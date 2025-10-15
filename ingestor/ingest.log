@@ -1,0 +1,1065 @@
+2025-08-20 11:36:29,866 INFO Starting ingestion run
+2025-08-20 11:36:29,866 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/1350228738014628326 (politics)
+C:\radiant\ingestor\.venv\Lib\site-packages\feedparser\html.py:152: DeprecationWarning: 'count' is passed as positional argument
+  data = re.sub(r'<!((?!DOCTYPE|--|\[))', r'&lt;!\1', data, re.IGNORECASE)
+2025-08-20 11:36:42,841 INFO IMG via OG scrape: https://saharareporters.com/themes/custom/octavia_sahara/dist/img/saharareporterslogo.webp
+C:\radiant\ingestor\.venv\Lib\site-packages\google\cloud\firestore_v1\base_collection.py:304: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  return query.where(field_path, op_string, value)
+2025-08-20 11:36:47,360 INFO IMG via OG scrape: https://thestreetjournal.org/wp-content/uploads/2025/08/IMG_20250820_085101.jpg
+2025-08-20 11:36:51,475 INFO IMG via OG scrape: https://i0.wp.com/www.ripplesnigeria.com/wp-content/uploads/2023/05/peter-obi-.webp?resize=739%2C415&#038;ssl=1
+2025-08-20 11:36:53,110 INFO IMG via OG scrape: https://dailypost.ng/wp-content/uploads/2025/07/wike.jpg
+2025-08-20 11:36:56,438 INFO IMG via OG scrape: https://osundefender.com/wp-content/uploads/2023/12/Tinubu.jpeg
+2025-08-20 11:36:58,022 INFO IMG via OG scrape: https://cdn.punchng.com/wp-content/uploads/2024/04/10024258/Lekan-Sote.png
+2025-08-20 11:37:00,673 INFO IMG via OG scrape: https://radionigerialagos.gov.ng/wp-content/uploads/2025/08/images-15-1.jpeg
+2025-08-20 11:37:02,705 INFO IMG via OG scrape: https://politicsnigeria.com/wp-content/uploads/2025/08/20250819_202158.jpg
+2025-08-20 11:37:11,828 INFO IMG via OG scrape: https://d1jcea4y7xhp7l.cloudfront.net/wp-content/uploads/2024/06/the-sun-logo-red.png
+2025-08-20 11:37:14,009 INFO IMG via OG scrape: https://www.gistmania.com/assets/images/logo.png
+2025-08-20 11:37:16,159 INFO IMG via OG scrape: https://dailypost.ng/wp-content/uploads/2025/08/Wike.jpg
+2025-08-20 11:37:18,676 INFO IMG via OG scrape: https://independent.ng/wp-content/uploads/Prince-Adewole-Adebayo-5.jpg
+2025-08-20 11:37:21,508 INFO IMG via OG scrape: https://cdn.legit.ng/images/1200x675/2c8c0790251885d8.jpeg?v=1
+2025-08-20 11:37:23,353 INFO IMG via OG scrape: https://www.thecable.ng/wp-content/uploads/2025/08/Dayo-Ekong.jpg
+2025-08-20 11:37:24,664 INFO IMG via OG scrape: https://uniprojects.net/wp-content/uploads/2025/07/uniproject.webp
+2025-08-20 11:37:25,990 INFO IMG via OG scrape: https://cdn.legit.ng/images/1200x675/296aefe80cd0e784.jpeg?v=1
+2025-08-20 11:37:30,094 INFO IMG via OG scrape: https://cdn.punchng.com/wp-content/uploads/2025/02/28020314/n.jpeg
+2025-08-20 11:37:31,782 INFO IMG via OG scrape: https://www.channelstv.com/wp-content/uploads/2025/08/jbhm-v.jpg
+2025-08-20 11:37:33,893 INFO IMG via OG scrape: https://i0.wp.com/www.westernpost.ng/wp-content/uploads/2025/08/IMG_20250820_035658_400_x_280_pixel.jpg
+2025-08-20 11:37:35,974 INFO IMG via OG scrape: https://politicsnigeria.com/wp-content/uploads/2025/08/20250819_162022.jpg
+2025-08-20 11:37:37,123 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/5085888265000552783 (football)
+2025-08-20 11:37:44,172 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/16695839084782454682 (celebrity)
+2025-08-20 11:38:21,054 INFO Ingestion done. written=32 skipped=0
+2025-10-13 13:49:50,914 INFO Starting ingestion run
+2025-10-13 13:49:50,915 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/1350228738014628326 (politics)
+2025-10-13 13:50:18,660 INFO Deep scrape fetch error: https://newsdiaryonline.com/why-governor-kefas-should-move-to-the-apc/ -> HTTPSConnectionPool(host='newsdiaryonline.com', port=443): Max retries exceeded with url: /why-governor-kefas-should-move-to-the-apc/ (Caused by NewConnectionError('<urllib3.connection.HTTPSConnection object at 0x000002243704E120>: Failed to establish a new connection: [WinError 10053] An established connection was aborted by the software in your host machine'))
+2025-10-13 13:50:20,843 INFO OG none: https://newsdiaryonline.com/why-governor-kefas-should-move-to-the-apc/
+2025-10-13 13:50:25,378 INFO IMG via DEEP scrape: https://dailypost.ng/wp-content/uploads/2025/07/Labour-party-Peter-Obi.jpg
+2025-10-13 13:50:28,099 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/ba8a5666b068d961bd9ffadbe0d918627c10639f37b7b9fda7de898febb2abb8?s=96&d=mm&r=g
+2025-10-13 13:50:31,151 INFO IMG via DEEP scrape: https://theeagleonline.com.ng/wp-content/uploads/2025/01/shell.png
+2025-10-13 13:50:35,078 INFO IMG via DEEP scrape: https://independent.ng/wp-content/uploads/2019/01/Gov-Wike.jpg
+2025-10-13 13:50:36,662 INFO IMG via DEEP scrape: https://independent.ng/wp-content/uploads/Matawalle-1fo.jpg
+2025-10-13 13:50:39,725 INFO IMG via DEEP scrape: https://theeagleonline.com.ng/wp-content/uploads/2025/01/shell.png
+2025-10-13 13:50:43,714 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/71518f6e9291de9a740aa3f401d15ed2e4847e5dc8085f998e7a1c4e902a6d1d?s=96&d=mm&r=g
+2025-10-13 13:50:48,101 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/a8322133f5381e10b2e6bcc8be2265c3a9cdeddf6f0fb0dbc3a9cc138fa3d321?s=96&d=mm&r=g
+2025-10-13 13:50:51,422 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/72446b1473d0a2011f2bde3d12a8ea1088f96dc272e5359585dfd15f3ad31c29?s=96&d=mm&r=g
+2025-10-13 13:50:53,232 INFO IMG via DEEP scrape: https://dailypost.ng/wp-content/uploads/2025/10/Abdullahi-Yusuf-Atah-1200x726.jpg
+2025-10-13 13:50:55,881 INFO IMG via DEEP scrape: https://globalupfront.com/wp-content/uploads/2025/10/TINUBU-ALONE-ALL-ALONE.jpg
+2025-10-13 13:50:58,201 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/a416ac14c695b23962df1664140eb497ffc903e7e9f0fbfa0c9a506dc7b19f54?s=96&d=mm&r=g
+2025-10-13 13:50:59,785 INFO Deep scrape fetch error: https://www.nairaland.com/8538371/video-lagosians-accuse-other-yorubas -> 403 Client Error: Forbidden for url: https://www.nairaland.com/8538371/video-lagosians-accuse-other-yorubas
+2025-10-13 13:51:00,318 INFO OG fetch status: https://www.nairaland.com/8538371/video-lagosians-accuse-other-yorubas -> 403
+2025-10-13 13:51:05,372 INFO IMG via DEEP scrape: https://www.thecable.ng/wp-content/uploads/2025/09/David-Umahi--e1757525927893.jpeg
+2025-10-13 13:51:08,809 INFO IMG via DEEP scrape: https://www.thepointng.com/wp-content/uploads/2025/05/336x280.png
+2025-10-13 13:51:13,058 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/f7ea7ad5582da3f753bdbc925c9d6ebe995cc9564a6c5ec60487448981ee931b?s=96&d=mm&r=g
+2025-10-13 13:51:15,870 INFO IMG via DEEP scrape: https://dailytrust.com/wp-content/uploads/2023/11/Adeleke.webp
+2025-10-13 13:51:17,366 INFO Deep scrape fetch error: https://punchng.com/ekiti-opposition-chasing-shadows-cant-defeat-oyebanji-apc-chieftain/ -> 403 Client Error: Forbidden for url: https://punchng.com/ekiti-opposition-chasing-shadows-cant-defeat-oyebanji-apc-chieftain/
+2025-10-13 13:51:17,953 INFO OG fetch status: https://punchng.com/ekiti-opposition-chasing-shadows-cant-defeat-oyebanji-apc-chieftain/ -> 403
+2025-10-13 13:51:24,182 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/1e39cec884661f1a47cec317516e3d80bccb0b1af3a5ad9ed4df16f60a56ba97?s=96&d=mm&r=g
+2025-10-13 13:51:25,125 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/11728161082198066318 (football)
+2025-10-13 13:51:39,624 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/16695839084782454682 (celebrity)
+2025-10-13 13:51:53,308 INFO Ingestion done. written=60 skipped=0
+ Volume in drive C is Windows 
+ Volume Serial Number is F474-B7F1
+
+ Directory of C:\radiant\ingestor
+
+10/13/2025  10:28 AM           513,817 cache_articles.json
+               1 File(s)        513,817 bytes
+               0 Dir(s)  192,549,769,216 bytes free
+2025-10-13 13:55:07,006 INFO Starting ingestion run
+2025-10-13 13:55:07,006 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/1350228738014628326 (politics)
+2025-10-13 13:55:14,105 INFO OG none: https://newsdiaryonline.com/why-governor-kefas-should-move-to-the-apc/
+2025-10-13 13:55:16,273 INFO IMG via DEEP scrape: https://dailypost.ng/wp-content/uploads/2025/07/Labour-party-Peter-Obi.jpg
+2025-10-13 13:55:17,685 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/ba8a5666b068d961bd9ffadbe0d918627c10639f37b7b9fda7de898febb2abb8?s=96&d=mm&r=g
+2025-10-13 13:55:19,804 INFO IMG via DEEP scrape: https://theeagleonline.com.ng/wp-content/uploads/2025/01/shell.png
+2025-10-13 13:55:21,062 INFO IMG via DEEP scrape: https://independent.ng/wp-content/uploads/2019/01/Gov-Wike.jpg
+2025-10-13 13:55:22,037 INFO IMG via DEEP scrape: https://independent.ng/wp-content/uploads/Matawalle-1fo.jpg
+2025-10-13 13:55:24,183 INFO IMG via DEEP scrape: https://theeagleonline.com.ng/wp-content/uploads/2025/01/shell.png
+2025-10-13 13:55:27,298 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/71518f6e9291de9a740aa3f401d15ed2e4847e5dc8085f998e7a1c4e902a6d1d?s=96&d=mm&r=g
+2025-10-13 13:55:28,536 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/a8322133f5381e10b2e6bcc8be2265c3a9cdeddf6f0fb0dbc3a9cc138fa3d321?s=96&d=mm&r=g
+2025-10-13 13:55:30,102 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/72446b1473d0a2011f2bde3d12a8ea1088f96dc272e5359585dfd15f3ad31c29?s=96&d=mm&r=g
+2025-10-13 13:55:31,182 INFO IMG via DEEP scrape: https://dailypost.ng/wp-content/uploads/2025/10/Abdullahi-Yusuf-Atah-1200x726.jpg
+2025-10-13 13:55:31,980 INFO IMG via DEEP scrape: https://globalupfront.com/wp-content/uploads/2025/10/TINUBU-ALONE-ALL-ALONE.jpg
+2025-10-13 13:55:33,545 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/a416ac14c695b23962df1664140eb497ffc903e7e9f0fbfa0c9a506dc7b19f54?s=96&d=mm&r=g
+2025-10-13 13:55:34,353 INFO Deep scrape fetch error: https://www.nairaland.com/8538371/video-lagosians-accuse-other-yorubas -> 403 Client Error: Forbidden for url: https://www.nairaland.com/8538371/video-lagosians-accuse-other-yorubas
+2025-10-13 13:55:34,906 INFO OG fetch status: https://www.nairaland.com/8538371/video-lagosians-accuse-other-yorubas -> 403
+2025-10-13 13:55:36,692 INFO IMG via DEEP scrape: https://www.thecable.ng/wp-content/uploads/2025/09/David-Umahi--e1757525927893.jpeg
+2025-10-13 13:55:38,657 INFO IMG via DEEP scrape: https://www.thepointng.com/wp-content/uploads/2025/05/336x280.png
+2025-10-13 13:55:41,244 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/f7ea7ad5582da3f753bdbc925c9d6ebe995cc9564a6c5ec60487448981ee931b?s=96&d=mm&r=g
+2025-10-13 13:55:43,236 INFO IMG via DEEP scrape: https://dailytrust.com/wp-content/uploads/2023/11/Adeleke.webp
+2025-10-13 13:55:44,105 INFO Deep scrape fetch error: https://punchng.com/ekiti-opposition-chasing-shadows-cant-defeat-oyebanji-apc-chieftain/ -> 403 Client Error: Forbidden for url: https://punchng.com/ekiti-opposition-chasing-shadows-cant-defeat-oyebanji-apc-chieftain/
+2025-10-13 13:55:44,620 INFO OG fetch status: https://punchng.com/ekiti-opposition-chasing-shadows-cant-defeat-oyebanji-apc-chieftain/ -> 403
+2025-10-13 13:55:47,938 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/1e39cec884661f1a47cec317516e3d80bccb0b1af3a5ad9ed4df16f60a56ba97?s=96&d=mm&r=g
+2025-10-13 13:55:48,229 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/11728161082198066318 (football)
+2025-10-13 13:55:54,699 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/16695839084782454682 (celebrity)
+2025-10-13 13:56:01,045 INFO Ingestion done. written=60 skipped=0
+ Volume in drive C is Windows 
+ Volume Serial Number is F474-B7F1
+
+ Directory of C:\radiant\ingestor
+
+10/13/2025  10:28 AM           513,817 cache_articles.json
+               1 File(s)        513,817 bytes
+               0 Dir(s)  192,556,388,352 bytes free
+2025-10-13 14:29:44,416 INFO Starting ingestion run
+2025-10-13 14:29:44,454 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/1350228738014628326 (politics)
+2025-10-13 14:29:54,447 INFO IMG via DEEP scrape: https://theeagleonline.com.ng/wp-content/uploads/2024/11/1280×317.jpg
+2025-10-13 14:30:03,155 INFO IMG via DEEP scrape: https://dailypost.ng/wp-content/uploads/2025/07/Jonathan-ebele-and-Peter-Obi.jpg
+2025-10-13 14:30:13,182 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/1255b0720f1d017fa694206dce1f0cb7b6c46a3eda12a769b55219676a0d1e02?s=96&d=mm&r=g
+2025-10-13 14:30:18,309 INFO IMG via DEEP scrape: https://i0.wp.com/www.westernpost.ng/wp-content/uploads/2025/10/Olawepo-Hashim.webp?resize=700%2C400&amp;ssl=1
+2025-10-13 14:30:22,499 INFO IMG via DEEP scrape: https://cdn.legit.ng/images/1200x675/a8134c865f631155.jpeg?v=1
+2025-10-13 14:30:28,774 INFO OG none: https://newsdiaryonline.com/why-governor-kefas-should-move-to-the-apc/
+2025-10-13 14:30:31,687 INFO IMG via DEEP scrape: https://dailypost.ng/wp-content/uploads/2025/07/Labour-party-Peter-Obi.jpg
+2025-10-13 14:30:37,764 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/ba8a5666b068d961bd9ffadbe0d918627c10639f37b7b9fda7de898febb2abb8?s=96&d=mm&r=g
+2025-10-13 14:30:43,164 INFO IMG via DEEP scrape: https://theeagleonline.com.ng/wp-content/uploads/2025/01/shell.png
+2025-10-13 14:30:51,127 INFO IMG via DEEP scrape: https://independent.ng/wp-content/uploads/2019/01/Gov-Wike.jpg
+2025-10-13 14:30:55,374 INFO IMG via DEEP scrape: https://independent.ng/wp-content/uploads/Matawalle-1fo.jpg
+2025-10-13 14:31:00,287 INFO IMG via DEEP scrape: https://theeagleonline.com.ng/wp-content/uploads/2025/01/shell.png
+2025-10-13 14:31:08,346 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/71518f6e9291de9a740aa3f401d15ed2e4847e5dc8085f998e7a1c4e902a6d1d?s=96&d=mm&r=g
+2025-10-13 14:31:13,784 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/a8322133f5381e10b2e6bcc8be2265c3a9cdeddf6f0fb0dbc3a9cc138fa3d321?s=96&d=mm&r=g
+2025-10-13 14:31:17,230 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/72446b1473d0a2011f2bde3d12a8ea1088f96dc272e5359585dfd15f3ad31c29?s=96&d=mm&r=g
+2025-10-13 14:31:23,085 INFO IMG via DEEP scrape: https://dailypost.ng/wp-content/uploads/2025/10/Abdullahi-Yusuf-Atah-1200x726.jpg
+2025-10-13 14:31:25,763 INFO IMG via DEEP scrape: https://globalupfront.com/wp-content/uploads/2025/10/TINUBU-ALONE-ALL-ALONE.jpg
+2025-10-13 14:31:29,500 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/a416ac14c695b23962df1664140eb497ffc903e7e9f0fbfa0c9a506dc7b19f54?s=96&d=mm&r=g
+2025-10-13 14:31:33,301 INFO Deep scrape fetch error: https://www.nairaland.com/8538371/video-lagosians-accuse-other-yorubas -> 403 Client Error: Forbidden for url: https://www.nairaland.com/8538371/video-lagosians-accuse-other-yorubas
+2025-10-13 14:31:35,211 INFO OG fetch status: https://www.nairaland.com/8538371/video-lagosians-accuse-other-yorubas -> 403
+2025-10-13 14:31:50,249 INFO IMG via DEEP scrape: https://www.thecable.ng/wp-content/uploads/2025/09/David-Umahi--e1757525927893.jpeg
+2025-10-13 14:31:50,609 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/11728161082198066318 (football)
+2025-10-13 14:32:14,087 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/16695839084782454682 (celebrity)
+2025-10-13 14:32:31,878 INFO Ingestion done. written=60 skipped=0
+ Volume in drive C is Windows 
+ Volume Serial Number is F474-B7F1
+
+ Directory of C:\radiant\ingestor
+
+10/13/2025  10:28 AM           513,817 cache_articles.json
+               1 File(s)        513,817 bytes
+               0 Dir(s)  192,835,899,392 bytes free
+2025-10-13 15:26:28,686 INFO Starting ingestion run
+2025-10-13 15:26:28,686 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/1350228738014628326 (politics)
+2025-10-13 15:26:52,508 INFO IMG via DEEP scrape: https://theeagleonline.com.ng/wp-content/uploads/2024/11/1280×317.jpg
+2025-10-13 15:27:02,440 INFO IMG via DEEP scrape: https://dailypost.ng/wp-content/uploads/2025/07/Jonathan-ebele-and-Peter-Obi.jpg
+2025-10-13 15:27:05,173 INFO Deep scrape fetch error: https://www.nairaland.com/8538632/nigerians-superlatively-safer-now-daniel -> 403 Client Error: Forbidden for url: https://www.nairaland.com/8538632/nigerians-superlatively-safer-now-daniel
+2025-10-13 15:27:08,413 INFO OG fetch status: https://www.nairaland.com/8538632/nigerians-superlatively-safer-now-daniel -> 403
+2025-10-13 15:27:20,593 INFO IMG via DEEP scrape: https://theeagleonline.com.ng/wp-content/uploads/2025/01/shell.png
+2025-10-13 15:27:46,006 INFO Deep scrape fetch error: https://theeagleonline.com.ng/category/politics/page/724/?page=1404 -> HTTPSConnectionPool(host='theeagleonline.com.ng', port=443): Read timed out.
+2025-10-13 15:27:54,015 INFO OG fetch error: https://theeagleonline.com.ng/category/politics/page/724/?page=1404 -> HTTPSConnectionPool(host='theeagleonline.com.ng', port=443): Max retries exceeded with url: /category/politics/page/724/?page=1404 (Caused by ConnectTimeoutError(<urllib3.connection.HTTPSConnection object at 0x000001CAAFE4A710>, 'Connection to theeagleonline.com.ng timed out. (connect timeout=8)'))
+2025-10-13 15:28:44,933 INFO Deep scrape fetch error: https://businessday.ng/columnist/article/beneath-the-surface/ -> HTTPSConnectionPool(host='businessday.ng', port=443): Max retries exceeded with url: /columnist/article/beneath-the-surface/ (Caused by NameResolutionError("<urllib3.connection.HTTPSConnection object at 0x000001CAAFE4B610>: Failed to resolve 'businessday.ng' ([Errno 11001] getaddrinfo failed)"))
+2025-10-13 15:28:56,446 INFO OG fetch error: https://businessday.ng/columnist/article/beneath-the-surface/ -> HTTPSConnectionPool(host='businessday.ng', port=443): Max retries exceeded with url: /columnist/article/beneath-the-surface/ (Caused by NameResolutionError("<urllib3.connection.HTTPSConnection object at 0x000001CAAFE4BED0>: Failed to resolve 'businessday.ng' ([Errno 11001] getaddrinfo failed)"))
+2025-10-13 15:29:07,322 INFO Deep scrape fetch error: https://societynow.ng/category/politics/page/511/ -> ('Connection aborted.', ConnectionResetError(10054, 'An existing connection was forcibly closed by the remote host', None, 10054, None))
+2025-10-13 15:29:18,745 INFO OG none: https://societynow.ng/category/politics/page/511/
+2025-10-13 15:29:24,804 INFO IMG via DEEP scrape: https://i0.wp.com/www.westernpost.ng/wp-content/uploads/2025/10/Olawepo-Hashim.webp?resize=700%2C400&amp;ssl=1
+2025-10-13 15:29:28,592 INFO IMG via DEEP scrape: https://independentpost.ng/wp-content/litespeed/avatar/f78bd6154edeab1675a0bc29f1e00c56.jpg
+2025-10-13 15:29:32,997 INFO IMG via DEEP scrape: https://independentpost.ng/wp-content/litespeed/avatar/f78bd6154edeab1675a0bc29f1e00c56.jpg
+2025-10-13 15:29:59,610 INFO Deep scrape fetch error: https://www.legit.ng/politics/1678327-2027-election-peter-obi-speaks-rumoured-agreement-goodluck-jonathan/ -> HTTPSConnectionPool(host='www.legit.ng', port=443): Read timed out. (read timeout=10)
+2025-10-13 15:30:16,189 INFO IMG via OG scrape: https://cdn.legit.ng/images/1200x675/a8134c865f631155.jpeg?v=1
+2025-10-13 15:30:29,157 INFO OG none: https://newsdiaryonline.com/why-governor-kefas-should-move-to-the-apc/
+2025-10-13 15:30:35,694 INFO IMG via DEEP scrape: https://dailypost.ng/wp-content/uploads/2025/07/Labour-party-Peter-Obi.jpg
+2025-10-13 15:30:41,434 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/ba8a5666b068d961bd9ffadbe0d918627c10639f37b7b9fda7de898febb2abb8?s=96&d=mm&r=g
+2025-10-13 15:30:53,789 INFO IMG via DEEP scrape: https://theeagleonline.com.ng/wp-content/uploads/2025/01/shell.png
+2025-10-13 15:31:04,000 INFO IMG via DEEP scrape: https://independent.ng/wp-content/uploads/2019/01/Gov-Wike.jpg
+2025-10-13 15:31:17,985 INFO IMG via DEEP scrape: https://independent.ng/wp-content/uploads/Matawalle-1fo.jpg
+2025-10-13 15:31:49,703 INFO Deep scrape fetch error: https://theeagleonline.com.ng/category/politics/page/744/?page=1404 -> HTTPSConnectionPool(host='theeagleonline.com.ng', port=443): Read timed out.
+2025-10-13 15:32:33,440 INFO OG fetch error: https://theeagleonline.com.ng/category/politics/page/744/?page=1404 -> HTTPSConnectionPool(host='theeagleonline.com.ng', port=443): Read timed out.
+2025-10-13 15:32:53,846 INFO Deep scrape fetch error: https://thenicheng.com/obi-reiterates-no-political-pact-with-jonathan-recent-friendly-visit-mere-routine/ -> HTTPSConnectionPool(host='thenicheng.com', port=443): Read timed out.
+2025-10-13 15:33:04,640 INFO IMG via OG scrape: https://thenicheng.com/wp-content/uploads/2025/10/ob-jona.png
+2025-10-13 15:33:44,503 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/a8322133f5381e10b2e6bcc8be2265c3a9cdeddf6f0fb0dbc3a9cc138fa3d321?s=96&d=mm&r=g
+2025-10-13 15:33:45,259 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/11728161082198066318 (football)
+Traceback (most recent call last):
+  File "C:\radiant\ingestor\main.py", line 799, in <module>
+    ingest()
+    ~~~~~~^^
+  File "C:\radiant\ingestor\main.py", line 790, in ingest
+    if upsert_article(doc):
+       ~~~~~~~~~~~~~~^^^^^
+  File "C:\radiant\ingestor\main.py", line 749, in upsert_article
+    coll.add(doc)
+    ~~~~~~~~^^^^^
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\cloud\firestore_v1\collection.py", line 132, in add
+    write_result = document_ref.create(document_data, **kwargs)
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\cloud\firestore_v1\document.py", line 99, in create
+    write_results = batch.commit(**kwargs)
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\cloud\firestore_v1\batch.py", line 61, in commit
+    commit_response = self._client._firestore_api.commit(
+        request=request,
+        metadata=self._client._rpc_metadata,
+        **kwargs,
+    )
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\cloud\firestore_v1\services\firestore\client.py", line 1431, in commit
+    response = rpc(
+        request,
+    ...<2 lines>...
+        metadata=metadata,
+    )
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\gapic_v1\method.py", line 131, in __call__
+    return wrapped_func(*args, **kwargs)
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\retry\retry_unary.py", line 294, in retry_wrapped_func
+    return retry_target(
+        target,
+    ...<3 lines>...
+        on_error=on_error,
+    )
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\retry\retry_unary.py", line 156, in retry_target
+    next_sleep = _retry_error_helper(
+        exc,
+    ...<6 lines>...
+        timeout,
+    )
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\retry\retry_base.py", line 214, in _retry_error_helper
+    raise final_exc from source_exc
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\retry\retry_unary.py", line 147, in retry_target
+    result = target()
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\timeout.py", line 130, in func_with_timeout
+    return func(*args, **kwargs)
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\grpc_helpers.py", line 78, in error_remapped_callable
+    raise exceptions.from_grpc_error(exc) from exc
+google.api_core.exceptions.AlreadyExists: 409 Document already exists: projects/radiant-waves/databases/(default)/documents/articles/aHvY5pKvjlEE6ccHFXJH
+ Volume in drive C is Windows 
+ Volume Serial Number is F474-B7F1
+
+ Directory of C:\radiant\ingestor
+
+10/13/2025  10:28 AM           513,817 cache_articles.json
+               1 File(s)        513,817 bytes
+               0 Dir(s)  192,039,985,152 bytes free
+2025-10-13 15:55:29,014 INFO Starting ingestion run
+2025-10-13 15:55:29,014 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/1350228738014628326 (politics)
+2025-10-13 15:55:32,151 INFO IMG via DEEP scrape: https://theeagleonline.com.ng/wp-content/uploads/2024/11/1280×317.jpg
+2025-10-13 15:55:34,678 INFO IMG via DEEP scrape: https://dailypost.ng/wp-content/uploads/2025/07/Jonathan-ebele-and-Peter-Obi.jpg
+2025-10-13 15:55:35,582 INFO Deep scrape fetch error: https://www.nairaland.com/8538632/nigerians-superlatively-safer-now-daniel -> 403 Client Error: Forbidden for url: https://www.nairaland.com/8538632/nigerians-superlatively-safer-now-daniel
+2025-10-13 15:55:35,892 INFO OG fetch status: https://www.nairaland.com/8538632/nigerians-superlatively-safer-now-daniel -> 403
+2025-10-13 15:55:38,051 INFO IMG via DEEP scrape: https://theeagleonline.com.ng/wp-content/uploads/2025/01/shell.png
+2025-10-13 15:55:40,200 INFO IMG via DEEP scrape: https://theeagleonline.com.ng/wp-content/uploads/2025/01/shell.png
+2025-10-13 15:55:43,751 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/1255b0720f1d017fa694206dce1f0cb7b6c46a3eda12a769b55219676a0d1e02?s=96&d=mm&r=g
+2025-10-13 15:55:45,670 INFO IMG via DEEP scrape: https://societynow.ng/wp-content/uploads/2017/03/Zenith-Bank.jpg
+2025-10-13 15:55:47,349 INFO IMG via DEEP scrape: https://i0.wp.com/www.westernpost.ng/wp-content/uploads/2025/10/Olawepo-Hashim.webp?resize=700%2C400&amp;ssl=1
+2025-10-13 15:55:49,325 INFO IMG via DEEP scrape: https://independentpost.ng/wp-content/litespeed/avatar/f78bd6154edeab1675a0bc29f1e00c56.jpg
+2025-10-13 15:55:51,399 INFO IMG via DEEP scrape: https://independentpost.ng/wp-content/litespeed/avatar/f78bd6154edeab1675a0bc29f1e00c56.jpg
+2025-10-13 15:56:03,463 INFO IMG via DEEP scrape: https://cdn.legit.ng/images/1200x675/a8134c865f631155.jpeg?v=1
+2025-10-13 15:56:08,388 INFO OG none: https://newsdiaryonline.com/why-governor-kefas-should-move-to-the-apc/
+2025-10-13 15:56:09,266 INFO IMG via DEEP scrape: https://dailypost.ng/wp-content/uploads/2025/07/Labour-party-Peter-Obi.jpg
+2025-10-13 15:56:20,016 INFO Deep scrape fetch error: https://www.tell.ng/ola-of-lagos-showroom-demolished-by-lagos-government/ -> HTTPSConnectionPool(host='www.tell.ng', port=443): Read timed out. (read timeout=10)
+2025-10-13 15:56:28,392 INFO OG fetch error: https://www.tell.ng/ola-of-lagos-showroom-demolished-by-lagos-government/ -> HTTPSConnectionPool(host='www.tell.ng', port=443): Read timed out. (read timeout=8)
+2025-10-13 15:56:30,567 INFO IMG via DEEP scrape: https://theeagleonline.com.ng/wp-content/uploads/2025/01/shell.png
+2025-10-13 15:56:34,016 INFO IMG via DEEP scrape: https://independent.ng/wp-content/uploads/2019/01/Gov-Wike.jpg
+2025-10-13 15:56:35,665 INFO IMG via DEEP scrape: https://independent.ng/wp-content/uploads/Matawalle-1fo.jpg
+2025-10-13 15:56:37,796 INFO IMG via DEEP scrape: https://theeagleonline.com.ng/wp-content/uploads/2025/01/shell.png
+2025-10-13 15:56:41,356 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/71518f6e9291de9a740aa3f401d15ed2e4847e5dc8085f998e7a1c4e902a6d1d?s=96&d=mm&r=g
+2025-10-13 15:56:45,245 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/a8322133f5381e10b2e6bcc8be2265c3a9cdeddf6f0fb0dbc3a9cc138fa3d321?s=96&d=mm&r=g
+2025-10-13 15:56:45,620 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/11728161082198066318 (football)
+2025-10-13 15:56:51,962 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/16695839084782454682 (celebrity)
+2025-10-13 15:56:57,747 INFO Ingestion done. written=60 skipped=0
+ Volume in drive C is Windows 
+ Volume Serial Number is F474-B7F1
+
+ Directory of C:\radiant\ingestor
+
+10/13/2025  10:28 AM           513,817 cache_articles.json
+               1 File(s)        513,817 bytes
+               0 Dir(s)  192,030,130,176 bytes free
+2025-10-13 16:01:14,043 INFO Starting ingestion run
+2025-10-13 16:01:14,043 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/1350228738014628326 (politics)
+C:\radiant\ingestor\.venv\Lib\site-packages\feedparser\html.py:152: DeprecationWarning: 'count' is passed as positional argument
+  data = re.sub(r'<!((?!DOCTYPE|--|\[))', r'&lt;!\1', data, re.IGNORECASE)
+2025-10-13 16:01:16,650 INFO IMG via DEEP scrape: https://theeagleonline.com.ng/wp-content/uploads/2024/11/1280×317.jpg
+2025-10-13 16:01:19,733 INFO IMG via DEEP scrape: https://dailypost.ng/wp-content/uploads/2025/07/Jonathan-ebele-and-Peter-Obi.jpg
+2025-10-13 16:01:20,919 INFO Deep scrape fetch error: https://www.nairaland.com/8538632/nigerians-superlatively-safer-now-daniel -> 403 Client Error: Forbidden for url: https://www.nairaland.com/8538632/nigerians-superlatively-safer-now-daniel
+2025-10-13 16:01:21,211 INFO OG fetch status: https://www.nairaland.com/8538632/nigerians-superlatively-safer-now-daniel -> 403
+2025-10-13 16:01:23,987 INFO IMG via DEEP scrape: https://theeagleonline.com.ng/wp-content/uploads/2025/01/shell.png
+2025-10-13 16:01:26,776 INFO IMG via DEEP scrape: https://theeagleonline.com.ng/wp-content/uploads/2025/01/shell.png
+2025-10-13 16:01:29,048 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/1255b0720f1d017fa694206dce1f0cb7b6c46a3eda12a769b55219676a0d1e02?s=96&d=mm&r=g
+2025-10-13 16:01:31,398 INFO IMG via DEEP scrape: https://societynow.ng/wp-content/uploads/2017/03/Zenith-Bank.jpg
+2025-10-13 16:01:33,613 INFO IMG via DEEP scrape: https://i0.wp.com/www.westernpost.ng/wp-content/uploads/2025/10/Olawepo-Hashim.webp?resize=700%2C400&amp;ssl=1
+2025-10-13 16:01:36,216 INFO IMG via DEEP scrape: https://independentpost.ng/wp-content/litespeed/avatar/f78bd6154edeab1675a0bc29f1e00c56.jpg
+2025-10-13 16:01:38,793 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/40eee6bf43c19a5d9309734568b847d5f1b7b4a595003dd7f2d941d037425cd0?s=96&amp%3Bd=mm&amp%3Br=g
+2025-10-13 16:01:39,915 INFO IMG via DEEP scrape: https://cdn.legit.ng/images/1200x675/a8134c865f631155.jpeg?v=1
+2025-10-13 16:01:45,008 INFO OG none: https://newsdiaryonline.com/why-governor-kefas-should-move-to-the-apc/
+2025-10-13 16:01:46,623 INFO IMG via DEEP scrape: https://dailypost.ng/wp-content/uploads/2025/07/Labour-party-Peter-Obi.jpg
+2025-10-13 16:01:51,497 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/ba8a5666b068d961bd9ffadbe0d918627c10639f37b7b9fda7de898febb2abb8?s=96&d=mm&r=g
+2025-10-13 16:01:54,270 INFO IMG via DEEP scrape: https://theeagleonline.com.ng/wp-content/uploads/2025/01/shell.png
+2025-10-13 16:01:57,319 INFO IMG via DEEP scrape: https://independent.ng/wp-content/uploads/2019/01/Gov-Wike.jpg
+2025-10-13 16:01:59,031 INFO IMG via DEEP scrape: https://independent.ng/wp-content/uploads/Matawalle-1fo.jpg
+2025-10-13 16:02:01,841 INFO IMG via DEEP scrape: https://theeagleonline.com.ng/wp-content/uploads/2025/01/shell.png
+2025-10-13 16:02:05,491 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/71518f6e9291de9a740aa3f401d15ed2e4847e5dc8085f998e7a1c4e902a6d1d?s=96&d=mm&r=g
+2025-10-13 16:02:09,477 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/a8322133f5381e10b2e6bcc8be2265c3a9cdeddf6f0fb0dbc3a9cc138fa3d321?s=96&d=mm&r=g
+2025-10-13 16:02:10,316 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/11728161082198066318 (football)
+2025-10-13 16:02:27,066 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/16695839084782454682 (celebrity)
+2025-10-13 16:02:40,550 INFO Ingestion done. written=60 skipped=0
+[ 6:00:40.97] DONE  
+ Volume in drive C is Windows 
+ Volume Serial Number is F474-B7F1
+
+ Directory of C:\radiant\ingestor
+
+10/13/2025  10:28 AM           513,817 cache_articles.json
+               1 File(s)        513,817 bytes
+               0 Dir(s)  192,019,714,048 bytes free
+2025-10-13 16:25:19,759 INFO Starting ingestion run
+2025-10-13 16:25:19,760 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/1350228738014628326 (politics)
+C:\radiant\ingestor\.venv\Lib\site-packages\feedparser\html.py:152: DeprecationWarning: 'count' is passed as positional argument
+  data = re.sub(r'<!((?!DOCTYPE|--|\[))', r'&lt;!\1', data, re.IGNORECASE)
+2025-10-13 16:25:22,451 INFO IMG via DEEP scrape: https://theeagleonline.com.ng/wp-content/uploads/2024/11/1280×317.jpg
+2025-10-13 16:25:26,851 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/1a8d27fb96890bc792c88fcb5dfe3e59c24253aefa755addbc75b0d7ed630a78?s=96&d=mm&r=g
+2025-10-13 16:25:29,477 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/1a8d27fb96890bc792c88fcb5dfe3e59c24253aefa755addbc75b0d7ed630a78?s=96&d=mm&r=g
+2025-10-13 16:25:30,825 INFO IMG via DEEP scrape: https://dailypost.ng/wp-content/uploads/2025/07/Jonathan-ebele-and-Peter-Obi.jpg
+2025-10-13 16:25:31,929 INFO Deep scrape fetch error: https://www.nairaland.com/8538632/nigerians-superlatively-safer-now-daniel -> 403 Client Error: Forbidden for url: https://www.nairaland.com/8538632/nigerians-superlatively-safer-now-daniel
+2025-10-13 16:25:32,189 INFO OG fetch status: https://www.nairaland.com/8538632/nigerians-superlatively-safer-now-daniel -> 403
+2025-10-13 16:25:35,380 INFO IMG via DEEP scrape: https://theeagleonline.com.ng/wp-content/uploads/2025/01/shell.png
+2025-10-13 16:25:38,082 INFO IMG via DEEP scrape: https://theeagleonline.com.ng/wp-content/uploads/2025/01/shell.png
+2025-10-13 16:25:40,903 INFO IMG via DEEP scrape: https://theeagleonline.com.ng/wp-content/uploads/2025/01/shell.png
+2025-10-13 16:25:44,143 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/1255b0720f1d017fa694206dce1f0cb7b6c46a3eda12a769b55219676a0d1e02?s=96&d=mm&r=g
+2025-10-13 16:25:46,778 INFO IMG via DEEP scrape: https://societynow.ng/wp-content/uploads/2017/03/Zenith-Bank.jpg
+2025-10-13 16:25:49,178 INFO IMG via DEEP scrape: https://i0.wp.com/www.westernpost.ng/wp-content/uploads/2025/10/Olawepo-Hashim.webp?resize=700%2C400&amp;ssl=1
+2025-10-13 16:25:51,466 INFO IMG via DEEP scrape: https://independentpost.ng/wp-content/litespeed/avatar/f78bd6154edeab1675a0bc29f1e00c56.jpg
+2025-10-13 16:25:53,905 INFO IMG via DEEP scrape: https://independentpost.ng/wp-content/litespeed/avatar/f78bd6154edeab1675a0bc29f1e00c56.jpg
+2025-10-13 16:25:55,249 INFO IMG via DEEP scrape: https://cdn.legit.ng/images/1200x675/a8134c865f631155.jpeg?v=1
+2025-10-13 16:26:00,486 INFO OG none: https://newsdiaryonline.com/why-governor-kefas-should-move-to-the-apc/
+2025-10-13 16:26:01,720 INFO IMG via DEEP scrape: https://dailypost.ng/wp-content/uploads/2025/07/Labour-party-Peter-Obi.jpg
+2025-10-13 16:26:04,173 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/ba8a5666b068d961bd9ffadbe0d918627c10639f37b7b9fda7de898febb2abb8?s=96&d=mm&r=g
+2025-10-13 16:26:06,859 INFO IMG via DEEP scrape: https://theeagleonline.com.ng/wp-content/uploads/2025/01/shell.png
+2025-10-13 16:26:09,900 INFO IMG via DEEP scrape: https://independent.ng/wp-content/uploads/2019/01/Gov-Wike.jpg
+2025-10-13 16:26:11,420 INFO IMG via DEEP scrape: https://independent.ng/wp-content/uploads/Matawalle-1fo.jpg
+2025-10-13 16:26:12,238 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/11728161082198066318 (football)
+2025-10-13 16:26:28,107 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/16695839084782454682 (celebrity)
+2025-10-13 16:26:41,122 INFO Ingestion done. written=60 skipped=0
+[ 6:00:40.97] DONE  
+ Volume in drive C is Windows 
+ Volume Serial Number is F474-B7F1
+
+ Directory of C:\radiant\ingestor
+
+10/13/2025  04:22 PM           494,065 cache_articles.json
+               1 File(s)        494,065 bytes
+               0 Dir(s)  192,021,417,984 bytes free
+2025-10-13 16:55:35,966 INFO Starting ingestion run
+2025-10-13 16:55:35,966 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/1350228738014628326 (politics)
+C:\radiant\ingestor\.venv\Lib\site-packages\feedparser\html.py:152: DeprecationWarning: 'count' is passed as positional argument
+  data = re.sub(r'<!((?!DOCTYPE|--|\[))', r'&lt;!\1', data, re.IGNORECASE)
+2025-10-13 16:55:41,320 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/2055001736edaaa494e11b18b414ddbaea84e5d49298be530d8428d1ecbf6234?s=96&d=mm&r=g
+2025-10-13 16:55:43,591 INFO IMG via DEEP scrape: https://cdn.legit.ng/images/1200x675/9b00225c7fb983ff.jpeg?v=1
+2025-10-13 16:55:44,720 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/d43d6bd246f62c34a24fb518f105c239?s=96&d=mm&r=g
+2025-10-13 16:55:46,960 INFO IMG via DEEP scrape: https://theeagleonline.com.ng/wp-content/uploads/2024/11/1280×317.jpg
+2025-10-13 16:55:47,929 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/1a8d27fb96890bc792c88fcb5dfe3e59c24253aefa755addbc75b0d7ed630a78?s=96&d=mm&r=g
+2025-10-13 16:55:48,818 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/1a8d27fb96890bc792c88fcb5dfe3e59c24253aefa755addbc75b0d7ed630a78?s=96&d=mm&r=g
+2025-10-13 16:55:49,620 INFO IMG via DEEP scrape: https://dailypost.ng/wp-content/uploads/2025/07/Jonathan-ebele-and-Peter-Obi.jpg
+2025-10-13 16:55:50,366 INFO Deep scrape fetch error: https://www.nairaland.com/8538632/nigerians-superlatively-safer-now-daniel -> 403 Client Error: Forbidden for url: https://www.nairaland.com/8538632/nigerians-superlatively-safer-now-daniel
+2025-10-13 16:55:50,590 INFO OG fetch status: https://www.nairaland.com/8538632/nigerians-superlatively-safer-now-daniel -> 403
+2025-10-13 16:55:52,725 INFO IMG via DEEP scrape: https://theeagleonline.com.ng/wp-content/uploads/2025/01/shell.png
+2025-10-13 16:55:55,059 INFO IMG via DEEP scrape: https://theeagleonline.com.ng/wp-content/uploads/2025/01/shell.png
+2025-10-13 16:55:57,168 INFO IMG via DEEP scrape: https://theeagleonline.com.ng/wp-content/uploads/2025/01/shell.png
+2025-10-13 16:55:58,499 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/1255b0720f1d017fa694206dce1f0cb7b6c46a3eda12a769b55219676a0d1e02?s=96&d=mm&r=g
+2025-10-13 16:56:00,130 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/09449df334a0c9f9f3b78467cb554a56c22c4e8e83f84e8f4d5d89af0c2116f7?s=96&d=mm&r=g
+2025-10-13 16:56:03,108 INFO IMG via DEEP scrape: https://societynow.ng/wp-content/uploads/2017/03/Zenith-Bank.jpg
+2025-10-13 16:56:04,353 INFO IMG via DEEP scrape: https://i0.wp.com/www.westernpost.ng/wp-content/uploads/2025/10/Olawepo-Hashim.webp?resize=700%2C400&amp;ssl=1
+2025-10-13 16:56:06,232 INFO IMG via DEEP scrape: https://independentpost.ng/wp-content/litespeed/avatar/f78bd6154edeab1675a0bc29f1e00c56.jpg
+2025-10-13 16:56:07,924 INFO IMG via DEEP scrape: https://independentpost.ng/wp-content/litespeed/avatar/f78bd6154edeab1675a0bc29f1e00c56.jpg
+2025-10-13 16:56:09,101 INFO IMG via DEEP scrape: https://cdn.legit.ng/images/1200x675/a8134c865f631155.jpeg?v=1
+2025-10-13 16:56:12,370 INFO OG none: https://newsdiaryonline.com/why-governor-kefas-should-move-to-the-apc/
+2025-10-13 16:56:13,184 INFO IMG via DEEP scrape: https://dailypost.ng/wp-content/uploads/2025/07/Labour-party-Peter-Obi.jpg
+2025-10-13 16:56:13,429 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/11728161082198066318 (football)
+2025-10-13 16:56:19,088 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/16695839084782454682 (celebrity)
+2025-10-13 16:56:25,527 INFO Ingestion done. written=60 skipped=0
+[ 6:00:40.97] DONE  
+ Volume in drive C is Windows 
+ Volume Serial Number is F474-B7F1
+
+ Directory of C:\radiant\ingestor
+
+10/13/2025  04:22 PM           494,065 cache_articles.json
+               1 File(s)        494,065 bytes
+               0 Dir(s)  192,017,297,408 bytes free
+2025-10-14 09:35:20,369 INFO Starting ingestion run
+2025-10-14 09:35:20,514 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/1350228738014628326 (politics)
+C:\radiant\ingestor\.venv\Lib\site-packages\feedparser\html.py:152: DeprecationWarning: 'count' is passed as positional argument
+  data = re.sub(r'<!((?!DOCTYPE|--|\[))', r'&lt;!\1', data, re.IGNORECASE)
+2025-10-14 09:35:25,027 INFO OG none: https://saharareporters.com/2025/10/14/ex-presidential-spokesman-reuben-abati-launch-three-new-books-nigerian-politics-society
+2025-10-14 09:35:35,069 INFO IMG via DEEP scrape: https://i0.wp.com/realnewsmagazine.net/wp-content/uploads/2025/10/image-451.png?fit=576%2C444&ssl=1
+2025-10-14 09:35:36,831 INFO IMG via DEEP scrape: https://www.channelstv.com/wp-content/uploads/2025/06/Asian-Stock-Market.jpg
+2025-10-14 09:35:39,788 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/45fcb31b8a5ef94dab7f9bac5c1f47dc20772ae5dc7698f09b7a200151378859?s=96&amp%3Bd=mm&amp%3Br=g
+2025-10-14 09:35:42,678 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/a8322133f5381e10b2e6bcc8be2265c3a9cdeddf6f0fb0dbc3a9cc138fa3d321?s=96&d=mm&r=g
+2025-10-14 09:35:44,837 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/6d9514d9d4ee57e4cdfeeadaf1212e49?s=96&d=mm&r=g
+2025-10-14 09:35:47,236 INFO IMG via DEEP scrape: https://global.ariseplay.com/amg/www.thisdaylive.com/uploads/Screenshot_20251013-155646.jpg
+2025-10-14 09:35:51,018 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/c0ae7580cf84bdd01f17272467df4e8e5980f5ed7c9f155faeb0091e12281944?s=96&d=mm&r=g
+2025-10-14 09:35:54,576 INFO IMG via DEEP scrape: https://theeagleonline.com.ng/wp-content/uploads/2025/01/shell.png
+2025-10-14 09:35:58,293 INFO IMG via DEEP scrape: https://i0.wp.com/www.nigeriacommunicationsweek.com.ng/wp-content/uploads/2025/10/cap-flight-2.jpg?resize=1000%2C600#038;ssl=1
+2025-10-14 09:36:00,095 INFO IMG via DEEP scrape: https://exclusivenews.com.ng/uploads/images/2025/10/exclusive-news-peter-obi-slams-umahi-over-2027-presidency-remarks-only-nigerians-decide-not-political-elites-548380.jpeg
+2025-10-14 09:36:02,523 INFO IMG via DEEP scrape: https://www.channelstv.com/wp-content/uploads/2025/10/MadagascarPoliticsUnrest.jpg
+2025-10-14 09:36:03,683 INFO Deep scrape fetch error: https://punchng.com/ekiti-2026-three-horse-race-looms-as-inec-timetable-triggers-political-fireworks/ -> 403 Client Error: Forbidden for url: https://punchng.com/ekiti-2026-three-horse-race-looms-as-inec-timetable-triggers-political-fireworks/
+2025-10-14 09:36:03,979 INFO OG fetch status: https://punchng.com/ekiti-2026-three-horse-race-looms-as-inec-timetable-triggers-political-fireworks/ -> 403
+2025-10-14 09:36:12,741 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/6d9514d9d4ee57e4cdfeeadaf1212e49?s=96&d=mm&r=g
+2025-10-14 09:36:26,028 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/1e39cec884661f1a47cec317516e3d80bccb0b1af3a5ad9ed4df16f60a56ba97?s=96&d=mm&r=g
+2025-10-14 09:36:37,635 INFO IMG via DEEP scrape: https://cdn.legit.ng/images/1200x675/cbdf1b19ec7da0d1.jpeg?v=1
+2025-10-14 09:36:40,751 INFO IMG via DEEP scrape: https://blogger.googleusercontent.com/img/a/AVvXsEhTkXNnQ2yWNfRWp8wGTEiJVxbLKgKkkAln8pHSJklycYFHmoRFCbfNh0cPPKvbTAvKuBmoRXCUZaJrMP9t_2Gsg1fyOprmat7tL_c09ameK2VdLNC-VxBqxpko1ecylcQtoeYS-G8TJMVYzGIwmxTwbaBnvs7YnwDAAqtPMXmnZV9b5afcJqseZ9graLY=s300
+2025-10-14 09:36:44,127 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/49407dc1f367e0351cc8fcaee533d1c4ddb3002844a930764408f79f539e9617?s=96&amp%3Bd=wavatar&amp%3Br=g
+2025-10-14 09:36:45,455 INFO Deep scrape fetch error: https://punchng.com/coalition-seeks-end-to-ibadan-dominance-in-oyo-politics/ -> 403 Client Error: Forbidden for url: https://punchng.com/coalition-seeks-end-to-ibadan-dominance-in-oyo-politics/
+2025-10-14 09:36:45,787 INFO OG fetch status: https://punchng.com/coalition-seeks-end-to-ibadan-dominance-in-oyo-politics/ -> 403
+2025-10-14 09:36:48,080 INFO Deep scrape fetch error: https://www.nairaland.com/8538951/national-assembly-moves-nigerias-2027 -> 403 Client Error: Forbidden for url: https://www.nairaland.com/8538951/national-assembly-moves-nigerias-2027
+2025-10-14 09:36:48,359 INFO OG fetch status: https://www.nairaland.com/8538951/national-assembly-moves-nigerias-2027 -> 403
+2025-10-14 09:36:49,182 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/11728161082198066318 (football)
+2025-10-14 09:37:05,263 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/16695839084782454682 (celebrity)
+2025-10-14 09:37:12,643 INFO Ingestion done. written=50 skipped=0
+[ 6:00:40.97] DONE  
+ Volume in drive C is Windows 
+ Volume Serial Number is F474-B7F1
+
+ Directory of C:\radiant\ingestor
+
+10/13/2025  04:22 PM           494,065 cache_articles.json
+               1 File(s)        494,065 bytes
+               0 Dir(s)  192,312,217,600 bytes free
+2025-10-14 09:55:40,536 INFO Starting ingestion run
+2025-10-14 09:55:40,537 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/1350228738014628326 (politics)
+C:\radiant\ingestor\.venv\Lib\site-packages\feedparser\html.py:152: DeprecationWarning: 'count' is passed as positional argument
+  data = re.sub(r'<!((?!DOCTYPE|--|\[))', r'&lt;!\1', data, re.IGNORECASE)
+2025-10-14 09:55:42,121 INFO Deep scrape fetch error: https://tribuneonlineng.com/leading-with-empathy-governor-abba-kabir-yusuf-and-the-politics-of-compassion/ -> HTTPSConnectionPool(host='tribuneonlineng.com', port=443): Max retries exceeded with url: /leading-with-empathy-governor-abba-kabir-yusuf-and-the-politics-of-compassion/ (Caused by SSLError(SSLCertVerificationError(1, "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: Hostname mismatch, certificate is not valid for 'tribuneonlineng.com'. (_ssl.c:1028)")))
+2025-10-14 09:55:42,357 INFO OG fetch error: https://tribuneonlineng.com/leading-with-empathy-governor-abba-kabir-yusuf-and-the-politics-of-compassion/ -> HTTPSConnectionPool(host='tribuneonlineng.com', port=443): Max retries exceeded with url: /leading-with-empathy-governor-abba-kabir-yusuf-and-the-politics-of-compassion/ (Caused by SSLError(SSLCertVerificationError(1, "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: Hostname mismatch, certificate is not valid for 'tribuneonlineng.com'. (_ssl.c:1028)")))
+2025-10-14 09:55:45,477 INFO IMG via DEEP scrape: https://global.ariseplay.com/amg/www.thisdaylive.com/uploads/Tinubu-with-Olubadan-Rasidi-Ladoja.jpg
+2025-10-14 09:55:46,828 INFO IMG via DEEP scrape: https://global.ariseplay.com/amg/www.thisdaylive.com/uploads/Charles-Soludo-2.jpeg
+2025-10-14 09:55:48,089 INFO OG none: https://saharareporters.com/2025/10/14/ex-presidential-spokesman-reuben-abati-launch-three-new-books-nigerian-politics-society
+2025-10-14 09:55:50,518 INFO IMG via DEEP scrape: https://i0.wp.com/realnewsmagazine.net/wp-content/uploads/2025/10/image-451.png?fit=576%2C444&ssl=1
+2025-10-14 09:55:51,579 INFO IMG via DEEP scrape: https://www.channelstv.com/wp-content/uploads/2025/06/Asian-Stock-Market.jpg
+2025-10-14 09:55:53,574 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/45fcb31b8a5ef94dab7f9bac5c1f47dc20772ae5dc7698f09b7a200151378859?s=96&amp%3Bd=mm&amp%3Br=g
+2025-10-14 09:55:55,135 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/a8322133f5381e10b2e6bcc8be2265c3a9cdeddf6f0fb0dbc3a9cc138fa3d321?s=96&d=mm&r=g
+2025-10-14 09:55:56,592 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/6d9514d9d4ee57e4cdfeeadaf1212e49?s=96&d=mm&r=g
+2025-10-14 09:55:57,584 INFO IMG via DEEP scrape: https://global.ariseplay.com/amg/www.thisdaylive.com/uploads/Screenshot_20251013-155646.jpg
+2025-10-14 09:55:59,763 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/c0ae7580cf84bdd01f17272467df4e8e5980f5ed7c9f155faeb0091e12281944?s=96&d=mm&r=g
+2025-10-14 09:56:01,959 INFO IMG via DEEP scrape: https://theeagleonline.com.ng/wp-content/uploads/2025/01/shell.png
+2025-10-14 09:56:04,797 INFO IMG via DEEP scrape: https://i0.wp.com/www.nigeriacommunicationsweek.com.ng/wp-content/uploads/2025/10/cap-flight-2.jpg?resize=1000%2C600#038;ssl=1
+2025-10-14 09:56:06,006 INFO IMG via DEEP scrape: https://exclusivenews.com.ng/uploads/images/2025/10/exclusive-news-peter-obi-slams-umahi-over-2027-presidency-remarks-only-nigerians-decide-not-political-elites-548380.jpeg
+2025-10-14 09:56:07,233 INFO IMG via DEEP scrape: https://www.channelstv.com/wp-content/uploads/2025/10/MadagascarPoliticsUnrest.jpg
+2025-10-14 09:56:07,956 INFO Deep scrape fetch error: https://punchng.com/ekiti-2026-three-horse-race-looms-as-inec-timetable-triggers-political-fireworks/ -> 403 Client Error: Forbidden for url: https://punchng.com/ekiti-2026-three-horse-race-looms-as-inec-timetable-triggers-political-fireworks/
+2025-10-14 09:56:08,277 INFO OG fetch status: https://punchng.com/ekiti-2026-three-horse-race-looms-as-inec-timetable-triggers-political-fireworks/ -> 403
+2025-10-14 09:56:09,473 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/6d9514d9d4ee57e4cdfeeadaf1212e49?s=96&d=mm&r=g
+2025-10-14 09:56:11,199 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/1e39cec884661f1a47cec317516e3d80bccb0b1af3a5ad9ed4df16f60a56ba97?s=96&d=mm&r=g
+2025-10-14 09:56:12,463 INFO IMG via DEEP scrape: https://cdn.legit.ng/images/1200x675/cbdf1b19ec7da0d1.jpeg?v=1
+2025-10-14 09:56:14,748 INFO IMG via DEEP scrape: https://blogger.googleusercontent.com/img/a/AVvXsEhTkXNnQ2yWNfRWp8wGTEiJVxbLKgKkkAln8pHSJklycYFHmoRFCbfNh0cPPKvbTAvKuBmoRXCUZaJrMP9t_2Gsg1fyOprmat7tL_c09ameK2VdLNC-VxBqxpko1ecylcQtoeYS-G8TJMVYzGIwmxTwbaBnvs7YnwDAAqtPMXmnZV9b5afcJqseZ9graLY=s300
+2025-10-14 09:56:15,009 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/11728161082198066318 (football)
+2025-10-14 09:56:20,767 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/16695839084782454682 (celebrity)
+2025-10-14 09:56:24,055 INFO Ingestion done. written=50 skipped=0
+[ 6:00:40.97] DONE  
+ Volume in drive C is Windows 
+ Volume Serial Number is F474-B7F1
+
+ Directory of C:\radiant\ingestor
+
+10/13/2025  04:22 PM           494,065 cache_articles.json
+               1 File(s)        494,065 bytes
+               0 Dir(s)  192,251,404,288 bytes free
+2025-10-14 10:56:07,670 INFO Starting ingestion run
+2025-10-14 10:56:07,702 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/1350228738014628326 (politics)
+C:\radiant\ingestor\.venv\Lib\site-packages\feedparser\html.py:152: DeprecationWarning: 'count' is passed as positional argument
+  data = re.sub(r'<!((?!DOCTYPE|--|\[))', r'&lt;!\1', data, re.IGNORECASE)
+2025-10-14 10:56:10,106 INFO IMG via DEEP scrape: https://thewhistler.ng/wp-content/uploads/2025/10/Untitled-design-8.jpg
+2025-10-14 10:56:16,735 INFO IMG via DEEP scrape: https://businessamlive.com/wp-content/uploads/2017/05/coal-mining-300x167.jpg
+2025-10-14 10:56:18,169 INFO IMG via DEEP scrape: https://tribuneonlineng.com/wp-content/uploads/2025/10/IMG_7317-150x150.jpeg
+2025-10-14 10:56:20,772 INFO IMG via DEEP scrape: https://global.ariseplay.com/amg/www.thisdaylive.com/uploads/Tinubu-with-Olubadan-Rasidi-Ladoja.jpg
+2025-10-14 10:56:23,396 INFO IMG via DEEP scrape: https://global.ariseplay.com/amg/www.thisdaylive.com/uploads/Charles-Soludo-2.jpeg
+2025-10-14 10:56:24,389 INFO Deep scrape fetch error: https://radionigeriaabuja.gov.ng/reps-accuse-desperate-politicians-of-using-courts-to-derail-opposition/ -> 403 Client Error: Forbidden for url: https://radionigeriaabuja.gov.ng/reps-accuse-desperate-politicians-of-using-courts-to-derail-opposition/
+2025-10-14 10:56:24,670 INFO OG fetch status: https://radionigeriaabuja.gov.ng/reps-accuse-desperate-politicians-of-using-courts-to-derail-opposition/ -> 403
+2025-10-14 10:56:26,324 INFO IMG via DEEP scrape: https://www.withinnigeria.com/wp-content/uploads/2025/10/Seyi-Tinubu.jpg
+2025-10-14 10:56:27,031 INFO Deep scrape fetch error: https://www.nairaland.com/8538913/2027-nass-proposes-november-2026 -> 403 Client Error: Forbidden for url: https://www.nairaland.com/8538913/2027-nass-proposes-november-2026
+2025-10-14 10:56:27,326 INFO OG fetch status: https://www.nairaland.com/8538913/2027-nass-proposes-november-2026 -> 403
+2025-10-14 10:56:28,231 INFO OG none: https://saharareporters.com/2025/10/14/ex-presidential-spokesman-reuben-abati-launch-three-new-books-nigerian-politics-society
+2025-10-14 10:56:30,280 INFO IMG via DEEP scrape: https://i0.wp.com/realnewsmagazine.net/wp-content/uploads/2025/10/image-451.png?fit=576%2C444&ssl=1
+2025-10-14 10:56:31,441 INFO IMG via DEEP scrape: https://www.channelstv.com/wp-content/uploads/2025/06/Asian-Stock-Market.jpg
+2025-10-14 10:56:33,148 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/45fcb31b8a5ef94dab7f9bac5c1f47dc20772ae5dc7698f09b7a200151378859?s=96&amp%3Bd=mm&amp%3Br=g
+2025-10-14 10:56:35,663 INFO IMG via DEEP scrape: https://theeagleonline.com.ng/wp-content/uploads/2025/01/shell.png
+2025-10-14 10:56:37,239 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/a8322133f5381e10b2e6bcc8be2265c3a9cdeddf6f0fb0dbc3a9cc138fa3d321?s=96&d=mm&r=g
+2025-10-14 10:56:39,604 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/f8938e45d940be8bda246c7c966dd253f5c7194b863f735686f56df25bf1b043?s=96&d=mm&r=g
+2025-10-14 10:56:40,902 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/6d9514d9d4ee57e4cdfeeadaf1212e49?s=96&d=mm&r=g
+2025-10-14 10:56:41,519 INFO IMG via DEEP scrape: https://global.ariseplay.com/amg/www.thisdaylive.com/uploads/Screenshot_20251013-155646.jpg
+2025-10-14 10:56:45,581 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/c0ae7580cf84bdd01f17272467df4e8e5980f5ed7c9f155faeb0091e12281944?s=96&d=mm&r=g
+2025-10-14 10:56:48,083 INFO IMG via DEEP scrape: https://theeagleonline.com.ng/wp-content/uploads/2025/01/shell.png
+2025-10-14 10:56:50,608 INFO IMG via DEEP scrape: https://i0.wp.com/www.nigeriacommunicationsweek.com.ng/wp-content/uploads/2025/10/cap-flight-2.jpg?resize=1000%2C600#038;ssl=1
+2025-10-14 10:56:50,886 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/11728161082198066318 (football)
+2025-10-14 10:56:57,271 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/16695839084782454682 (celebrity)
+2025-10-14 10:57:00,662 INFO Ingestion done. written=49 skipped=0
+[ 6:00:40.97] DONE  
+ Volume in drive C is Windows 
+ Volume Serial Number is F474-B7F1
+
+ Directory of C:\radiant\ingestor
+
+10/13/2025  04:22 PM           494,065 cache_articles.json
+               1 File(s)        494,065 bytes
+               0 Dir(s)  192,071,950,336 bytes free
+2025-10-14 11:57:31,840 INFO Starting ingestion run
+2025-10-14 11:57:31,840 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/1350228738014628326 (politics)
+C:\radiant\ingestor\.venv\Lib\site-packages\feedparser\html.py:152: DeprecationWarning: 'count' is passed as positional argument
+  data = re.sub(r'<!((?!DOCTYPE|--|\[))', r'&lt;!\1', data, re.IGNORECASE)
+2025-10-14 11:57:34,267 INFO IMG via DEEP scrape: https://i0.wp.com/www.asabametro.com/wp-content/uploads/2025/10/Governor-Peter-Mbah.png?resize=400%2C240&ssl=1
+Traceback (most recent call last):
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\grpc_helpers.py", line 170, in error_remapped_callable
+    return _StreamingResponseIterator(
+        result, prefetch_first_result=prefetch_first
+    )
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\grpc_helpers.py", line 92, in __init__
+    self._stored_first_result = next(self._wrapped)
+                                ~~~~^^^^^^^^^^^^^^^
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\grpc\_channel.py", line 543, in __next__
+    return self._next()
+           ~~~~~~~~~~^^
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\grpc\_channel.py", line 969, in _next
+    raise self
+grpc._channel._MultiThreadedRendezvous: <_MultiThreadedRendezvous of RPC that terminated with:
+	status = StatusCode.RESOURCE_EXHAUSTED
+	details = "Quota exceeded."
+	debug_error_string = "UNKNOWN:Error received from peer ipv4:142.251.30.95:443 {grpc_status:8, grpc_message:"Quota exceeded."}"
+>
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\retry\retry_unary.py", line 147, in retry_target
+    result = target()
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\timeout.py", line 130, in func_with_timeout
+    return func(*args, **kwargs)
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\grpc_helpers.py", line 174, in error_remapped_callable
+    raise exceptions.from_grpc_error(exc) from exc
+google.api_core.exceptions.ResourceExhausted: 429 Quota exceeded.
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\radiant\ingestor\main.py", line 799, in <module>
+    ingest()
+    ~~~~~~^^
+  File "C:\radiant\ingestor\main.py", line 790, in ingest
+    if upsert_article(doc):
+       ~~~~~~~~~~~~~~^^^^^
+  File "C:\radiant\ingestor\main.py", line 735, in upsert_article
+    existing = list(coll.where(filter=FieldFilter("url", "==", url)).limit(1).stream())
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\cloud\firestore_v1\stream_generator.py", line 58, in __next__
+    return self._generator.__next__()
+           ~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\cloud\firestore_v1\query.py", line 410, in _make_stream
+    response_iterator, expected_prefix = self._get_stream_iterator(
+                                         ~~~~~~~~~~~~~~~~~~~~~~~~~^
+        transaction,
+        ^^^^^^^^^^^^
+    ...<2 lines>...
+        explain_options,
+        ^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\cloud\firestore_v1\query.py", line 260, in _get_stream_iterator
+    response_iterator = self._client._firestore_api.run_query(
+        request=request,
+        metadata=self._client._rpc_metadata,
+        **kwargs,
+    )
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\cloud\firestore_v1\services\firestore\client.py", line 1624, in run_query
+    response = rpc(
+        request,
+    ...<2 lines>...
+        metadata=metadata,
+    )
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\gapic_v1\method.py", line 131, in __call__
+    return wrapped_func(*args, **kwargs)
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\retry\retry_unary.py", line 294, in retry_wrapped_func
+    return retry_target(
+        target,
+    ...<3 lines>...
+        on_error=on_error,
+    )
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\retry\retry_unary.py", line 156, in retry_target
+    next_sleep = _retry_error_helper(
+        exc,
+    ...<6 lines>...
+        timeout,
+    )
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\retry\retry_base.py", line 229, in _retry_error_helper
+    raise final_exc from source_exc
+google.api_core.exceptions.RetryError: Timeout of 300.0s exceeded, last exception: 429 Quota exceeded.
+[ 6:00:40.97] DONE  
+ Volume in drive C is Windows 
+ Volume Serial Number is F474-B7F1
+
+ Directory of C:\radiant\ingestor
+
+10/14/2025  11:09 AM           457,712 cache_articles.json
+               1 File(s)        457,712 bytes
+               0 Dir(s)  192,021,643,264 bytes free
+2025-10-14 12:55:53,650 INFO Starting ingestion run
+2025-10-14 12:55:53,652 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/1350228738014628326 (politics)
+C:\radiant\ingestor\.venv\Lib\site-packages\feedparser\html.py:152: DeprecationWarning: 'count' is passed as positional argument
+  data = re.sub(r'<!((?!DOCTYPE|--|\[))', r'&lt;!\1', data, re.IGNORECASE)
+2025-10-14 12:55:55,659 INFO IMG via DEEP scrape: https://thewhistler.ng/wp-content/uploads/2024/01/images-2024-01-16T165453.271.jpg
+2025-10-14 12:55:57,911 INFO IMG via DEEP scrape: https://thewhistler.ng/wp-content/uploads/2025/10/Gov-Peter-Mbah.jpg
+Traceback (most recent call last):
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\grpc_helpers.py", line 170, in error_remapped_callable
+    return _StreamingResponseIterator(
+        result, prefetch_first_result=prefetch_first
+    )
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\grpc_helpers.py", line 92, in __init__
+    self._stored_first_result = next(self._wrapped)
+                                ~~~~^^^^^^^^^^^^^^^
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\grpc\_channel.py", line 543, in __next__
+    return self._next()
+           ~~~~~~~~~~^^
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\grpc\_channel.py", line 969, in _next
+    raise self
+grpc._channel._MultiThreadedRendezvous: <_MultiThreadedRendezvous of RPC that terminated with:
+	status = StatusCode.RESOURCE_EXHAUSTED
+	details = "Quota exceeded."
+	debug_error_string = "UNKNOWN:Error received from peer ipv4:142.250.151.95:443 {grpc_message:"Quota exceeded.", grpc_status:8}"
+>
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\retry\retry_unary.py", line 147, in retry_target
+    result = target()
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\timeout.py", line 130, in func_with_timeout
+    return func(*args, **kwargs)
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\grpc_helpers.py", line 174, in error_remapped_callable
+    raise exceptions.from_grpc_error(exc) from exc
+google.api_core.exceptions.ResourceExhausted: 429 Quota exceeded.
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\radiant\ingestor\main.py", line 799, in <module>
+    ingest()
+    ~~~~~~^^
+  File "C:\radiant\ingestor\main.py", line 790, in ingest
+    if upsert_article(doc):
+       ~~~~~~~~~~~~~~^^^^^
+  File "C:\radiant\ingestor\main.py", line 735, in upsert_article
+    existing = list(coll.where(filter=FieldFilter("url", "==", url)).limit(1).stream())
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\cloud\firestore_v1\stream_generator.py", line 58, in __next__
+    return self._generator.__next__()
+           ~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\cloud\firestore_v1\query.py", line 410, in _make_stream
+    response_iterator, expected_prefix = self._get_stream_iterator(
+                                         ~~~~~~~~~~~~~~~~~~~~~~~~~^
+        transaction,
+        ^^^^^^^^^^^^
+    ...<2 lines>...
+        explain_options,
+        ^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\cloud\firestore_v1\query.py", line 260, in _get_stream_iterator
+    response_iterator = self._client._firestore_api.run_query(
+        request=request,
+        metadata=self._client._rpc_metadata,
+        **kwargs,
+    )
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\cloud\firestore_v1\services\firestore\client.py", line 1624, in run_query
+    response = rpc(
+        request,
+    ...<2 lines>...
+        metadata=metadata,
+    )
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\gapic_v1\method.py", line 131, in __call__
+    return wrapped_func(*args, **kwargs)
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\retry\retry_unary.py", line 294, in retry_wrapped_func
+    return retry_target(
+        target,
+    ...<3 lines>...
+        on_error=on_error,
+    )
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\retry\retry_unary.py", line 156, in retry_target
+    next_sleep = _retry_error_helper(
+        exc,
+    ...<6 lines>...
+        timeout,
+    )
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\retry\retry_base.py", line 229, in _retry_error_helper
+    raise final_exc from source_exc
+google.api_core.exceptions.RetryError: Timeout of 300.0s exceeded, last exception: 429 Quota exceeded.
+[ 6:00:40.97] DONE  
+ Volume in drive C is Windows 
+ Volume Serial Number is F474-B7F1
+
+ Directory of C:\radiant\ingestor
+
+10/14/2025  11:09 AM           457,712 cache_articles.json
+               1 File(s)        457,712 bytes
+               0 Dir(s)  191,824,232,448 bytes free
+2025-10-14 13:26:20,263 INFO Starting ingestion run
+2025-10-14 13:26:20,263 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/1350228738014628326 (politics)
+2025-10-14 13:26:20,343 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/11728161082198066318 (football)
+2025-10-14 13:26:20,375 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/16695839084782454682 (celebrity)
+2025-10-14 13:26:20,407 INFO Ingestion done. written=0 skipped=0
+[ 6:00:40.97] DONE  
+ Volume in drive C is Windows 
+ Volume Serial Number is F474-B7F1
+
+ Directory of C:\radiant\ingestor
+
+10/14/2025  11:09 AM           457,712 cache_articles.json
+               1 File(s)        457,712 bytes
+               0 Dir(s)  191,815,471,104 bytes free
+2025-10-14 13:55:49,869 INFO Starting ingestion run
+2025-10-14 13:55:49,869 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/1350228738014628326 (politics)
+C:\radiant\ingestor\.venv\Lib\site-packages\feedparser\html.py:152: DeprecationWarning: 'count' is passed as positional argument
+  data = re.sub(r'<!((?!DOCTYPE|--|\[))', r'&lt;!\1', data, re.IGNORECASE)
+2025-10-14 13:55:52,945 INFO IMG via DEEP scrape: https://i0.wp.com/www.westernpost.ng/wp-content/uploads/2025/10/20251014_125758.webp?resize=780%2C470&amp;ssl=1
+^C2025-10-14 14:56:35,371 INFO Starting ingestion run
+2025-10-14 14:56:35,401 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/1350228738014628326 (politics)
+C:\radiant\ingestor\.venv\Lib\site-packages\feedparser\html.py:152: DeprecationWarning: 'count' is passed as positional argument
+  data = re.sub(r'<!((?!DOCTYPE|--|\[))', r'&lt;!\1', data, re.IGNORECASE)
+2025-10-14 14:56:38,674 INFO IMG via DEEP scrape: https://i0.wp.com/www.westernpost.ng/wp-content/uploads/2025/10/20251014_125758.webp?resize=780%2C470&amp;ssl=1
+Traceback (most recent call last):
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\grpc_helpers.py", line 170, in error_remapped_callable
+    return _StreamingResponseIterator(
+        result, prefetch_first_result=prefetch_first
+    )
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\grpc_helpers.py", line 92, in __init__
+    self._stored_first_result = next(self._wrapped)
+                                ~~~~^^^^^^^^^^^^^^^
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\grpc\_channel.py", line 543, in __next__
+    return self._next()
+           ~~~~~~~~~~^^
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\grpc\_channel.py", line 969, in _next
+    raise self
+grpc._channel._MultiThreadedRendezvous: <_MultiThreadedRendezvous of RPC that terminated with:
+	status = StatusCode.RESOURCE_EXHAUSTED
+	details = "Quota exceeded."
+	debug_error_string = "UNKNOWN:Error received from peer ipv4:142.251.30.95:443 {grpc_status:8, grpc_message:"Quota exceeded."}"
+>
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\retry\retry_unary.py", line 147, in retry_target
+    result = target()
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\timeout.py", line 130, in func_with_timeout
+    return func(*args, **kwargs)
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\grpc_helpers.py", line 174, in error_remapped_callable
+    raise exceptions.from_grpc_error(exc) from exc
+google.api_core.exceptions.ResourceExhausted: 429 Quota exceeded.
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\radiant\ingestor\main.py", line 799, in <module>
+    ingest()
+    ~~~~~~^^
+  File "C:\radiant\ingestor\main.py", line 790, in ingest
+    if upsert_article(doc):
+       ~~~~~~~~~~~~~~^^^^^
+  File "C:\radiant\ingestor\main.py", line 735, in upsert_article
+    existing = list(coll.where(filter=FieldFilter("url", "==", url)).limit(1).stream())
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\cloud\firestore_v1\stream_generator.py", line 58, in __next__
+    return self._generator.__next__()
+           ~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\cloud\firestore_v1\query.py", line 410, in _make_stream
+    response_iterator, expected_prefix = self._get_stream_iterator(
+                                         ~~~~~~~~~~~~~~~~~~~~~~~~~^
+        transaction,
+        ^^^^^^^^^^^^
+    ...<2 lines>...
+        explain_options,
+        ^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\cloud\firestore_v1\query.py", line 260, in _get_stream_iterator
+    response_iterator = self._client._firestore_api.run_query(
+        request=request,
+        metadata=self._client._rpc_metadata,
+        **kwargs,
+    )
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\cloud\firestore_v1\services\firestore\client.py", line 1624, in run_query
+    response = rpc(
+        request,
+    ...<2 lines>...
+        metadata=metadata,
+    )
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\gapic_v1\method.py", line 131, in __call__
+    return wrapped_func(*args, **kwargs)
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\retry\retry_unary.py", line 294, in retry_wrapped_func
+    return retry_target(
+        target,
+    ...<3 lines>...
+        on_error=on_error,
+    )
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\retry\retry_unary.py", line 156, in retry_target
+    next_sleep = _retry_error_helper(
+        exc,
+    ...<6 lines>...
+        timeout,
+    )
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\retry\retry_base.py", line 229, in _retry_error_helper
+    raise final_exc from source_exc
+google.api_core.exceptions.RetryError: Timeout of 300.0s exceeded, last exception: 429 Quota exceeded.
+[ 6:00:40.97] DONE  
+ Volume in drive C is Windows 
+ Volume Serial Number is F474-B7F1
+
+ Directory of C:\radiant\ingestor
+
+10/14/2025  11:09 AM           457,712 cache_articles.json
+               1 File(s)        457,712 bytes
+               0 Dir(s)  191,838,367,744 bytes free
+2025-10-14 15:25:59,175 INFO Starting ingestion run
+2025-10-14 15:25:59,175 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/1350228738014628326 (politics)
+C:\radiant\ingestor\.venv\Lib\site-packages\feedparser\html.py:152: DeprecationWarning: 'count' is passed as positional argument
+  data = re.sub(r'<!((?!DOCTYPE|--|\[))', r'&lt;!\1', data, re.IGNORECASE)
+2025-10-14 15:26:00,951 INFO OG fetch status: https://tribuneonlineng.com/category/politics/page/2012/ -> 307
+Traceback (most recent call last):
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\grpc_helpers.py", line 170, in error_remapped_callable
+    return _StreamingResponseIterator(
+        result, prefetch_first_result=prefetch_first
+    )
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\grpc_helpers.py", line 92, in __init__
+    self._stored_first_result = next(self._wrapped)
+                                ~~~~^^^^^^^^^^^^^^^
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\grpc\_channel.py", line 543, in __next__
+    return self._next()
+           ~~~~~~~~~~^^
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\grpc\_channel.py", line 969, in _next
+    raise self
+grpc._channel._MultiThreadedRendezvous: <_MultiThreadedRendezvous of RPC that terminated with:
+	status = StatusCode.RESOURCE_EXHAUSTED
+	details = "Quota exceeded."
+	debug_error_string = "UNKNOWN:Error received from peer ipv4:64.233.185.95:443 {grpc_status:8, grpc_message:"Quota exceeded."}"
+>
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\retry\retry_unary.py", line 147, in retry_target
+    result = target()
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\timeout.py", line 130, in func_with_timeout
+    return func(*args, **kwargs)
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\grpc_helpers.py", line 174, in error_remapped_callable
+    raise exceptions.from_grpc_error(exc) from exc
+google.api_core.exceptions.ResourceExhausted: 429 Quota exceeded.
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\radiant\ingestor\main.py", line 799, in <module>
+    ingest()
+    ~~~~~~^^
+  File "C:\radiant\ingestor\main.py", line 790, in ingest
+    if upsert_article(doc):
+       ~~~~~~~~~~~~~~^^^^^
+  File "C:\radiant\ingestor\main.py", line 735, in upsert_article
+    existing = list(coll.where(filter=FieldFilter("url", "==", url)).limit(1).stream())
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\cloud\firestore_v1\stream_generator.py", line 58, in __next__
+    return self._generator.__next__()
+           ~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\cloud\firestore_v1\query.py", line 410, in _make_stream
+    response_iterator, expected_prefix = self._get_stream_iterator(
+                                         ~~~~~~~~~~~~~~~~~~~~~~~~~^
+        transaction,
+        ^^^^^^^^^^^^
+    ...<2 lines>...
+        explain_options,
+        ^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\cloud\firestore_v1\query.py", line 260, in _get_stream_iterator
+    response_iterator = self._client._firestore_api.run_query(
+        request=request,
+        metadata=self._client._rpc_metadata,
+        **kwargs,
+    )
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\cloud\firestore_v1\services\firestore\client.py", line 1624, in run_query
+    response = rpc(
+        request,
+    ...<2 lines>...
+        metadata=metadata,
+    )
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\gapic_v1\method.py", line 131, in __call__
+    return wrapped_func(*args, **kwargs)
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\retry\retry_unary.py", line 294, in retry_wrapped_func
+    return retry_target(
+        target,
+    ...<3 lines>...
+        on_error=on_error,
+    )
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\retry\retry_unary.py", line 156, in retry_target
+    next_sleep = _retry_error_helper(
+        exc,
+    ...<6 lines>...
+        timeout,
+    )
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\retry\retry_base.py", line 229, in _retry_error_helper
+    raise final_exc from source_exc
+google.api_core.exceptions.RetryError: Timeout of 300.0s exceeded, last exception: 429 Quota exceeded.
+[ 6:00:40.97] DONE  
+ Volume in drive C is Windows 
+ Volume Serial Number is F474-B7F1
+
+ Directory of C:\radiant\ingestor
+
+10/14/2025  11:09 AM           457,712 cache_articles.json
+               1 File(s)        457,712 bytes
+               0 Dir(s)  191,688,966,144 bytes free
+2025-10-14 15:58:07,765 INFO Starting ingestion run
+2025-10-14 15:58:07,765 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/1350228738014628326 (politics)
+C:\radiant\ingestor\.venv\Lib\site-packages\feedparser\html.py:152: DeprecationWarning: 'count' is passed as positional argument
+  data = re.sub(r'<!((?!DOCTYPE|--|\[))', r'&lt;!\1', data, re.IGNORECASE)
+2025-10-14 15:58:09,675 INFO OG fetch status: https://tribuneonlineng.com/reuben-abati-to-present-three-new-books-on-politics-society-personal-reflections/ -> 307
+Traceback (most recent call last):
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\grpc_helpers.py", line 170, in error_remapped_callable
+    return _StreamingResponseIterator(
+        result, prefetch_first_result=prefetch_first
+    )
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\grpc_helpers.py", line 92, in __init__
+    self._stored_first_result = next(self._wrapped)
+                                ~~~~^^^^^^^^^^^^^^^
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\grpc\_channel.py", line 543, in __next__
+    return self._next()
+           ~~~~~~~~~~^^
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\grpc\_channel.py", line 969, in _next
+    raise self
+grpc._channel._MultiThreadedRendezvous: <_MultiThreadedRendezvous of RPC that terminated with:
+	status = StatusCode.RESOURCE_EXHAUSTED
+	details = "Quota exceeded."
+	debug_error_string = "UNKNOWN:Error received from peer ipv4:64.233.185.95:443 {grpc_status:8, grpc_message:"Quota exceeded."}"
+>
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\retry\retry_unary.py", line 147, in retry_target
+    result = target()
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\timeout.py", line 130, in func_with_timeout
+    return func(*args, **kwargs)
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\grpc_helpers.py", line 174, in error_remapped_callable
+    raise exceptions.from_grpc_error(exc) from exc
+google.api_core.exceptions.ResourceExhausted: 429 Quota exceeded.
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\radiant\ingestor\main.py", line 799, in <module>
+    ingest()
+    ~~~~~~^^
+  File "C:\radiant\ingestor\main.py", line 790, in ingest
+    if upsert_article(doc):
+       ~~~~~~~~~~~~~~^^^^^
+  File "C:\radiant\ingestor\main.py", line 735, in upsert_article
+    existing = list(coll.where(filter=FieldFilter("url", "==", url)).limit(1).stream())
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\cloud\firestore_v1\stream_generator.py", line 58, in __next__
+    return self._generator.__next__()
+           ~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\cloud\firestore_v1\query.py", line 410, in _make_stream
+    response_iterator, expected_prefix = self._get_stream_iterator(
+                                         ~~~~~~~~~~~~~~~~~~~~~~~~~^
+        transaction,
+        ^^^^^^^^^^^^
+    ...<2 lines>...
+        explain_options,
+        ^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\cloud\firestore_v1\query.py", line 260, in _get_stream_iterator
+    response_iterator = self._client._firestore_api.run_query(
+        request=request,
+        metadata=self._client._rpc_metadata,
+        **kwargs,
+    )
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\cloud\firestore_v1\services\firestore\client.py", line 1624, in run_query
+    response = rpc(
+        request,
+    ...<2 lines>...
+        metadata=metadata,
+    )
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\gapic_v1\method.py", line 131, in __call__
+    return wrapped_func(*args, **kwargs)
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\retry\retry_unary.py", line 294, in retry_wrapped_func
+    return retry_target(
+        target,
+    ...<3 lines>...
+        on_error=on_error,
+    )
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\retry\retry_unary.py", line 156, in retry_target
+    next_sleep = _retry_error_helper(
+        exc,
+    ...<6 lines>...
+        timeout,
+    )
+  File "C:\radiant\ingestor\.venv\Lib\site-packages\google\api_core\retry\retry_base.py", line 229, in _retry_error_helper
+    raise final_exc from source_exc
+google.api_core.exceptions.RetryError: Timeout of 300.0s exceeded, last exception: 429 Quota exceeded.
+[ 6:00:40.97] DONE  
+ Volume in drive C is Windows 
+ Volume Serial Number is F474-B7F1
+
+ Directory of C:\radiant\ingestor
+
+10/14/2025  11:09 AM           457,712 cache_articles.json
+               1 File(s)        457,712 bytes
+               0 Dir(s)  191,524,532,224 bytes free
+2025-10-15 09:56:22,589 INFO Starting ingestion run
+2025-10-15 09:56:22,600 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/1350228738014628326 (politics)
+C:\radiant\ingestor\.venv\Lib\site-packages\feedparser\html.py:152: DeprecationWarning: 'count' is passed as positional argument
+  data = re.sub(r'<!((?!DOCTYPE|--|\[))', r'&lt;!\1', data, re.IGNORECASE)
+2025-10-15 09:56:25,550 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/8dfa41ef867635591a462eba1b49dc0363ffa7b873ebcf5fb41cb0e8395f20c6?s=96&d=mm&r=g
+2025-10-15 09:56:30,302 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/aa55ad08842ba55cabaf4ccd01c0f6a54915c5ea2283f45ef7110defd2ea12b8?s=96&d=mm&r=g
+2025-10-15 09:56:32,113 INFO IMG via DEEP scrape: https://leadership.ng/wp-content/uploads/2024/01/PDP-360x180.png
+2025-10-15 09:56:33,554 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/6d9514d9d4ee57e4cdfeeadaf1212e49?s=96&d=mm&r=g
+2025-10-15 09:56:35,538 INFO IMG via DEEP scrape: https://dailypost.ng/wp-content/uploads/2025/01/1-8-4-1200x1095.jpg
+2025-10-15 09:56:38,517 INFO IMG via DEEP scrape: https://blueprint.ng/wp-content/uploads/2025/10/FB_IMG_1760452951899-735x400.jpg
+2025-10-15 09:56:40,360 INFO IMG via DEEP scrape: https://dailypost.ng/wp-content/uploads/2025/08/APC-1200x686.jpeg
+2025-10-15 09:56:43,839 INFO IMG via DEEP scrape: http://freshangleng.com/articleimg/34d87761-2cd8-4ef3-b670-8c8ddce49151.jpg
+2025-10-15 09:56:45,702 INFO IMG via DEEP scrape: https://global.ariseplay.com/amg/www.thisdaylive.com/uploads/Peter-Mbah-16.jpg
+2025-10-15 09:56:46,792 INFO IMG via DEEP scrape: https://cdn.legit.ng/images/1200x675/111c341e405a4be9.jpeg?v=1
+2025-10-15 09:56:48,353 INFO Deep scrape fetch error: https://www.nairaland.com/8539370/senate-apc-hits-absolute-majority -> 403 Client Error: Forbidden for url: https://www.nairaland.com/8539370/senate-apc-hits-absolute-majority
+2025-10-15 09:56:49,119 INFO OG fetch status: https://www.nairaland.com/8539370/senate-apc-hits-absolute-majority -> 403
+2025-10-15 09:56:59,290 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/1e39cec884661f1a47cec317516e3d80bccb0b1af3a5ad9ed4df16f60a56ba97?s=96&d=mm&r=g
+2025-10-15 09:57:01,531 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/3afbe6c24310782bd0ae57b6c5c6d5d60d0d92a268ed9e85fe10984de7dd73fa?s=96&amp%3Bd=mm&amp%3Br=g
+2025-10-15 09:57:03,932 INFO Deep scrape fetch error: https://www.nairaland.com/8539708/hardship-soon-over-shettima-assures -> 403 Client Error: Forbidden for url: https://www.nairaland.com/8539708/hardship-soon-over-shettima-assures
+2025-10-15 09:57:04,677 INFO OG fetch status: https://www.nairaland.com/8539708/hardship-soon-over-shettima-assures -> 403
+2025-10-15 09:57:19,500 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/1e39cec884661f1a47cec317516e3d80bccb0b1af3a5ad9ed4df16f60a56ba97?s=96&d=mm&r=g
+2025-10-15 09:57:24,594 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/2ffc754815733355f922be2bc78e8bd3260f49da5a54439303a732ddedea5530?s=96&d=mm&r=g
+2025-10-15 09:57:26,232 INFO Deep scrape fetch error: https://www.nairaland.com/8539521/2027-northern-leaders-meet-afenifere -> 403 Client Error: Forbidden for url: https://www.nairaland.com/8539521/2027-northern-leaders-meet-afenifere
+2025-10-15 09:57:27,034 INFO OG fetch status: https://www.nairaland.com/8539521/2027-northern-leaders-meet-afenifere -> 403
+2025-10-15 09:57:30,206 INFO IMG via DEEP scrape: https://hurpa.org.ng/storage/thumbnails/68e79f34c762f.jpg
+2025-10-15 09:57:32,235 INFO IMG via DEEP scrape: https://www.lindaikejisblog.com/photos/shares/trump-ap-020425-768x512-1_1760463186.webp
+2025-10-15 09:57:35,312 INFO IMG via DEEP scrape: https://theeagleonline.com.ng/wp-content/uploads/2025/01/shell.png
+2025-10-15 09:57:36,129 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/11728161082198066318 (football)
+2025-10-15 09:57:50,507 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/16695839084782454682 (celebrity)
+2025-10-15 09:58:00,182 INFO Ingestion done. written=55 skipped=0
+[ 6:00:40.97] DONE  
+ Volume in drive C is Windows 
+ Volume Serial Number is F474-B7F1
+
+ Directory of C:\radiant\ingestor
+
+10/15/2025  09:57 AM           450,551 cache_articles.json
+               1 File(s)        450,551 bytes
+               0 Dir(s)  192,181,096,448 bytes free
+2025-10-15 10:25:28,631 INFO Starting ingestion run
+2025-10-15 10:25:28,631 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/1350228738014628326 (politics)
+C:\radiant\ingestor\.venv\Lib\site-packages\feedparser\html.py:152: DeprecationWarning: 'count' is passed as positional argument
+  data = re.sub(r'<!((?!DOCTYPE|--|\[))', r'&lt;!\1', data, re.IGNORECASE)
+2025-10-15 10:25:31,229 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/8dfa41ef867635591a462eba1b49dc0363ffa7b873ebcf5fb41cb0e8395f20c6?s=96&d=mm&r=g
+2025-10-15 10:25:35,524 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/aa55ad08842ba55cabaf4ccd01c0f6a54915c5ea2283f45ef7110defd2ea12b8?s=96&d=mm&r=g
+2025-10-15 10:25:37,707 INFO IMG via DEEP scrape: https://leadership.ng/wp-content/uploads/2024/01/PDP-360x180.png
+2025-10-15 10:25:39,506 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/6d9514d9d4ee57e4cdfeeadaf1212e49?s=96&d=mm&r=g
+2025-10-15 10:25:41,445 INFO IMG via DEEP scrape: https://dailypost.ng/wp-content/uploads/2025/01/1-8-4-1200x1095.jpg
+2025-10-15 10:25:43,991 INFO IMG via DEEP scrape: https://blueprint.ng/wp-content/uploads/2025/10/FB_IMG_1760452951899-735x400.jpg
+2025-10-15 10:25:45,841 INFO IMG via DEEP scrape: https://dailypost.ng/wp-content/uploads/2025/08/APC-1200x686.jpeg
+2025-10-15 10:25:50,218 INFO IMG via DEEP scrape: http://freshangleng.com/articleimg/34d87761-2cd8-4ef3-b670-8c8ddce49151.jpg
+2025-10-15 10:25:52,005 INFO IMG via DEEP scrape: https://global.ariseplay.com/amg/www.thisdaylive.com/uploads/Peter-Mbah-16.jpg
+2025-10-15 10:25:53,902 INFO IMG via DEEP scrape: https://cdn.legit.ng/images/1200x675/111c341e405a4be9.jpeg?v=1
+2025-10-15 10:25:55,013 INFO Deep scrape fetch error: https://www.nairaland.com/8539370/senate-apc-hits-absolute-majority -> 403 Client Error: Forbidden for url: https://www.nairaland.com/8539370/senate-apc-hits-absolute-majority
+2025-10-15 10:25:55,325 INFO OG fetch status: https://www.nairaland.com/8539370/senate-apc-hits-absolute-majority -> 403
+2025-10-15 10:25:57,700 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/1e39cec884661f1a47cec317516e3d80bccb0b1af3a5ad9ed4df16f60a56ba97?s=96&d=mm&r=g
+2025-10-15 10:25:59,564 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/3afbe6c24310782bd0ae57b6c5c6d5d60d0d92a268ed9e85fe10984de7dd73fa?s=96&amp%3Bd=mm&amp%3Br=g
+2025-10-15 10:26:00,748 INFO Deep scrape fetch error: https://www.nairaland.com/8539708/hardship-soon-over-shettima-assures -> 403 Client Error: Forbidden for url: https://www.nairaland.com/8539708/hardship-soon-over-shettima-assures
+2025-10-15 10:26:01,214 INFO OG fetch status: https://www.nairaland.com/8539708/hardship-soon-over-shettima-assures -> 403
+2025-10-15 10:26:04,885 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/1e39cec884661f1a47cec317516e3d80bccb0b1af3a5ad9ed4df16f60a56ba97?s=96&d=mm&r=g
+2025-10-15 10:26:07,921 INFO IMG via DEEP scrape: https://secure.gravatar.com/avatar/2ffc754815733355f922be2bc78e8bd3260f49da5a54439303a732ddedea5530?s=96&d=mm&r=g
+2025-10-15 10:26:09,087 INFO Deep scrape fetch error: https://www.nairaland.com/8539521/2027-northern-leaders-meet-afenifere -> 403 Client Error: Forbidden for url: https://www.nairaland.com/8539521/2027-northern-leaders-meet-afenifere
+2025-10-15 10:26:09,393 INFO OG fetch status: https://www.nairaland.com/8539521/2027-northern-leaders-meet-afenifere -> 403
+2025-10-15 10:26:10,981 INFO IMG via DEEP scrape: https://hurpa.org.ng/storage/thumbnails/68e79f34c762f.jpg
+2025-10-15 10:26:12,368 INFO IMG via DEEP scrape: https://www.lindaikejisblog.com/photos/shares/trump-ap-020425-768x512-1_1760463186.webp
+2025-10-15 10:26:15,322 INFO IMG via DEEP scrape: https://theeagleonline.com.ng/wp-content/uploads/2025/01/shell.png
+2025-10-15 10:26:16,145 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/11728161082198066318 (football)
+2025-10-15 10:26:31,622 INFO Fetching feed: https://www.google.com/alerts/feeds/09855239715608489155/16695839084782454682 (celebrity)
+2025-10-15 10:26:41,450 INFO Ingestion done. written=55 skipped=0
+[ 6:00:40.97] DONE  
+ Volume in drive C is Windows 
+ Volume Serial Number is F474-B7F1
+
+ Directory of C:\radiant\ingestor
+
+10/15/2025  10:21 AM           427,274 cache_articles.json
+               1 File(s)        427,274 bytes
+               0 Dir(s)  192,181,653,504 bytes free
