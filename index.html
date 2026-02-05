@@ -4,115 +4,158 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Radiant Waves</title>
-  <link rel="icon" type="image/png" href="img/Radiantwaves nobg.png">
+  <link rel="icon" type="image/png" href="img/Radiantwaves nobg.png" />
 
+  <!-- Font Awesome (for icons used in template/footer) -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+  <!-- Existing status pill styles (kept) -->
+  <style>
+    .rw-status {
+      position: fixed; top: 12px; right: 12px; z-index: 9999;
+      font: 12px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+      padding: 6px 10px; border-radius: 999px; background: rgba(0,0,0,.75); color: #fff;
+      box-shadow: 0 4px 16px rgba(0,0,0,.25); user-select: none;
+    }
+    .rw-status.syncing { background: rgba(32,101,209,.9); }
+    .rw-status.offline { background: rgba(204,41,54,.9); }
+    .rw-status.stale   { background: rgba(153,98,12,.9); }
+  </style>
+
+  <!-- Your main stylesheet -->
   <link rel="stylesheet" href="styles.css" />
 </head>
+
 <body>
-  <!-- <header class="topbar">
-  <a href="/" class="brand">
-    <img class="brand-logo" src="img/Radiantwaves nobgedit.png" alt="RadiantWaves">
-    <span class="brand-name">RadiantWaves</span>
-  </a>
-</header> -->
+  <!-- Connectivity + last refresh pill -->
+  <div id="rwStatus" class="rw-status">Live • <span id="rwTime">never</span></div>
 
-  <!-- Top brand bar -->
-  <div class="brand-strip"></div>
-
-  <!-- Header / Navbar -->
+  <!-- HEADER (new structure, but hooks preserved) -->
   <header class="site-header">
+    <!-- Top strip -->
+    <div class="header-top">
+      <div class="wrap header-top-inner">
+        <div class="datetime">
+          <span id="current-date"></span>
+          <span id="current-time"></span>
+        </div>
+
+        <!-- breaking ticker mount (we’ll wire later) -->
+        <div class="live-indicator" aria-live="polite">
+          <span class="pulse" aria-hidden="true"></span>
+          <span id="breakingLine">LIVE NOW: Radiant Waves</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main header row -->
     <div class="wrap header-inner">
       <a class="brand" href="#" data-feed="" aria-label="Radiant Waves Home">
-        <span class="brand-mark">Radiant</span><span class="brand-rest">Waves</span>
+        <img class="brand-logo" src="img/radiant-waves11.png" alt="RadiantWaves">
       </a>
-
-      <!-- Primary nav -->
-      <nav class="main-nav" aria-label="Primary">
-        <a href="#" class="nav-link active" data-feed="" aria-current="page">Home</a>
-        <a href="#" class="nav-link" data-feed="politics">Politics</a>
-        <a href="#" class="nav-link" data-feed="football">Football</a>
-        <a href="#" class="nav-link" data-feed="celebrity">Celebrity</a>
-      </nav>
-
-      <!-- Search -->
+  
+      <!-- Search (PRESERVE IDs) -->
       <form id="searchForm" class="search" role="search" aria-label="Search articles">
         <input id="q" type="search" placeholder="Search…" inputmode="search" />
-        <button class="search-btn" type="submit" aria-label="Search">🔎</button>
+        <button class="search-btn" type="submit" aria-label="Search">
+          <i class="fas fa-search"></i>
+        </button>
       </form>
     </div>
+
+    <!-- Nav (PRESERVE .nav-link + data-feed) -->
+    <nav class="main-nav-wrap" aria-label="Primary">
+      <div class="wrap main-nav">
+        <a href="#" class="nav-link active" data-feed="" aria-current="page"><i class="fas fa-home"></i> Home</a>
+        <a href="#" class="nav-link" data-feed="politics"><i class="fas fa-landmark"></i> Politics</a>
+        <a href="#" class="nav-link" data-feed="football"><i class="fas fa-futbol"></i> Football</a>
+        <a href="#" class="nav-link" data-view="match-center"><i class="fas fa-chart-line"></i> Match Center</a>
+        <a href="#" class="nav-link" data-feed="celebrity"><i class="fas fa-star"></i> Celebrity</a>
+      </div>
+    </nav>
+
+    <!-- Brand strip -->
+    <div class="brand-strip"></div>
   </header>
 
-  <!-- Status line -->
+  <!-- Status line (PRESERVE ID) -->
   <div class="status-wrap">
-    <div id="status" class="status" aria-live="polite"></div>
+    <div class="wrap">
+      <div id="status" class="status" aria-live="polite"></div>
+    </div>
   </div>
 
-  <!-- Main content -->
+  <!-- MAIN (PRESERVE #home + #results) -->
   <main class="wrap main-grid">
-    <!-- Home view (hero + sections) -->
     <div id="home" class="home-view"></div>
-
-    <!-- Feed/search results view -->
     <ul id="results" class="cards-grid" style="display:none;"></ul>
   </main>
 
-  <!-- Footer -->
+  <!-- FOOTER (you can keep your existing footer content later; basic kept here) -->
   <footer class="site-footer">
     <div class="wrap footer-inner">
       <div class="footer-column">
         <h3>Radiant Waves</h3>
-        <p>Delivering accurate and timely news from around the world. Trusted by millions of readers daily.</p>
+        <p>Accurate and timely news, plus live football coverage.</p>
         <div class="social-links">
-          <a href="#"><i class="fab fa-facebook-f"></i></a>
-          <a href="#"><i class="fab fa-twitter"></i></a>
-          <a href="#"><i class="fab fa-instagram"></i></a>
-          <a href="#"><i class="fab fa-linkedin-in"></i></a>
+          <a href="#" aria-label="Facebook"><i class="fab fa-facebook-f"></i></a>
+          <a href="#" aria-label="X/Twitter"><i class="fab fa-twitter"></i></a>
+          <a href="#" aria-label="Instagram"><i class="fab fa-instagram"></i></a>
+          <a href="#" aria-label="YouTube"><i class="fab fa-youtube"></i></a>
         </div>
       </div>
-      
+
       <div class="footer-column">
         <h3>Categories</h3>
         <ul class="footer-links">
-          <li><a href="#">Politics</a></li>
-          <li><a href="#">Sports</a></li>
-          <li><a href="#">Entertainment</a></li>
-          <li><a href="#">Technology</a></li>
-          <li><a href="#">Business</a></li>
+          <li><a href="#" class="nav-link" data-feed="politics">Politics</a></li>
+          <li><a href="#" class="nav-link" data-feed="football">Football</a></li>
+          <li><a href="#" class="nav-link" data-feed="celebrity">Celebrity</a></li>
         </ul>
       </div>
-      
+
       <div class="footer-column">
         <h3>Company</h3>
         <ul class="footer-links">
-          <li><a href="#">About Us</a></li>
-          <li><a href="#">Careers</a></li>
+          <li><a href="#">About</a></li>
           <li><a href="#">Advertise</a></li>
-          <li><a href="#">Terms of Service</a></li>
-          <li><a href="#">Privacy Policy</a></li>
+          <li><a href="#">Privacy</a></li>
         </ul>
       </div>
-      
+
       <div class="footer-column">
-        <h3>Contact Info</h3>
+        <h3>Contact</h3>
         <ul class="footer-links">
-          <li><i class="fas fa-map-marker-alt"></i> 123 News Street, City</li>
-          <li><i class="fas fa-phone"></i> +1 234 567 8900</li>
           <li><i class="fas fa-envelope"></i> info@radiantwaves.com</li>
         </ul>
       </div>
     </div>
-    
+
     <div class="copyright wrap">
-      <p>© <span id="year"></span> Radiant Waves • Curated feeds from your sources</p>
+      <p>© <span id="year"></span> Radiant Waves</p>
     </div>
   </footer>
 
   <script type="module">
-    // small footer year helper
-    document.getElementById('year').textContent = new Date().getFullYear();
+    // footer year
+    document.getElementById("year").textContent = new Date().getFullYear();
+
+    // header date/time
+    function updateDateTime(){
+      const now = new Date();
+      const date = now.toLocaleDateString(undefined, { weekday:"long", year:"numeric", month:"long", day:"numeric" });
+      const time = now.toLocaleTimeString(undefined, { hour:"2-digit", minute:"2-digit" });
+      const d = document.getElementById("current-date");
+      const t = document.getElementById("current-time");
+      if (d) d.textContent = date;
+      if (t) t.textContent = time;
+    }
+    updateDateTime();
+    setInterval(updateDateTime, 60000);
   </script>
+
   <!-- app modules -->
   <script type="module" src="settings.js"></script>
-   <script type="module" src="app.js?v=20250827a"></script>
+  <script type="module" src="app.js"></script>
 </body>
 </html>
