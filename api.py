@@ -12,7 +12,8 @@ from datetime import datetime, timezone
 from urllib.parse import urlparse, urljoin
 
 import requests
-from flask import Flask, jsonify, request, Response, redirect
+import feedparser  # ← for football RSS
+from flask import Flask, jsonify, request, Response, redirect, render_template, url_for, abort
 from flask_cors import CORS
 from google.cloud import firestore
 from google.oauth2 import service_account
@@ -30,6 +31,7 @@ CACHE_PATH = os.path.join(os.path.dirname(__file__), "cache_articles.json")
 
 # Gate the scheduler so it runs in exactly ONE process
 RUN_JOBS = os.getenv("RUN_JOBS", "0") == "1"
+_MEM_TTL = int(os.getenv("MEM_TTL_SECONDS", "60"))  # default 60s
 # ------------------------------------------
 
 # Flask
@@ -121,6 +123,28 @@ else:
 
 coll = db.collection("articles")
 
+# ----------------- Slugs / doc helpers (for SSR) -----------------
+def slugify(text: str) -> str:
+    if not text:
+        return ""
+    s = re.sub(r"[^a-zA-Z0-9\s-]", "", text).strip().lower()
+    s = re.sub(r"\s+", "-", s)
+    return s[:80]
+
+def ensure_slug(rec: dict) -> dict:
+    if not rec:
+        return rec
+    if not rec.get("slug"):
+        rec["slug"] = slugify(rec.get("cleanTitle") or rec.get("title") or "")
+    return rec
+
+def _get_doc_by_id(doc_id: str):
+    return coll.document(doc_id).get()
+
+def _get_doc_by_slug(slug: str):
+    q = coll.where("slug", "==", slug).limit(1).stream()
+    return next(q, None)
+
 # ----------------- CORS + cache headers -----------------
 @app.after_request
 def add_cors(resp):
@@ -146,12 +170,24 @@ def root():
     return jsonify({
         "ok": True,
         "service": "radiant-waves",
-        "endpoints": ["/articles", "/img", "/pick_image", "/diag", "/health", "/latest", "/r/<docid>"]
+        "endpoints": [
+            "/articles",
+            "/search_articles",
+            "/football",
+            "/livescore",
+            "/img",
+            "/pick_image",
+            "/diag",
+            "/health",
+            "/latest",
+            "/read/<slug>",
+            "/r/<id>",
+            "/sitemap.xml",
+        ]
     })
 
 # ----------------- Tiny in-memory TTL cache -----------------
 _MEM = {"articles": {"ts": 0.0, "payload": []}}
-_MEM_TTL = int(os.getenv("MEM_TTL_SECONDS", "60"))  # default 60s
 
 def _mem_get():
     now = time.time()
@@ -269,6 +305,53 @@ def list_articles():
     resp.headers["X-From-Cache"] = "1" if from_cache else "0"
     resp.headers["X-Mem-Cache"] = "1" if (mem is not None and not is_search and not feed) else "0"
     return resp
+
+# ----------------- Backend Search (full Firestore or cache) -----------------
+@app.get("/search_articles")
+def search_articles():
+    q = (request.args.get("q") or "").strip()
+    if not q:
+        return jsonify({"ok": False, "error": "missing q"}), 400
+
+    q_lower = q.lower()
+    limit = int(request.args.get("limit", "50"))
+
+    docs = []
+    from_cache = False
+
+    try:
+        # Pull deeper than normal browse
+        qref = coll.order_by("ingestedAt", direction=firestore.Query.DESCENDING).limit(800)
+        for _doc in qref.stream(retry=None, timeout=10):
+            d = _doc.to_dict()
+            d["id"] = _doc.id
+            docs.append(d)
+    except ResourceExhausted as e:
+        log.warning("search_articles: quota exceeded, falling back to cache: %s", e)
+        docs = _read_cache()
+        from_cache = True
+    except Exception as e:
+        log.warning("search_articles: fetch failed, falling back to cache: %s", e)
+        docs = _read_cache()
+        from_cache = True
+
+    def tl(s): return (s or "").lower()
+    results = [
+        d for d in docs
+        if q_lower in tl(d.get("title_lower") or d.get("title"))
+        or q_lower in tl(d.get("summary"))
+        or q_lower in tl(d.get("feed"))
+    ]
+
+    results.sort(
+        key=lambda d: _parse_ts_maybe(d.get("ingestedAt") or d.get("publishedAt")),
+        reverse=True,
+    )
+
+    if not from_cache:
+        results = [doc_to_public(d) for d in results]
+
+    return jsonify(results[:limit])
 
 # ----------------- Image proxy (streamed, memory-safe) -----------------
 @app.route("/img", methods=["GET"])
@@ -652,6 +735,7 @@ def latest():
             d = _doc.to_dict()
             d["id"] = _doc.id
             d = ensure_image_fields(d)  # ensure imageUrl/image_url present
+            d = ensure_slug(d)
             out.append(doc_to_public(d))
         if not out:
             return jsonify({"ok": False, "error": "no_articles"}), 404
@@ -666,22 +750,133 @@ def latest():
         log.exception("latest failed")
         return jsonify({"ok": False, "error": str(e)}), 500
 
-# ----------------- Redirect (branded link) -----------------
-@app.route("/r/<docid>", methods=["GET", "HEAD", "OPTIONS"])
-def redirect_article(docid):
-    # Preflight
-    if request.method == "OPTIONS":
-        return ("", 204)
+# ----------------- SSR: /read/<slug> (first-party article page) -----------------
+@app.get("/read/<slug>")
+def read(slug):
+    # try slug first
+    snap = _get_doc_by_slug(slug)
+    doc = None
+    if snap:
+        doc = snap.to_dict()
+        doc["id"] = snap.id
+    # fallback via ?id=
+    if not doc:
+        doc_id = request.args.get("id", "").strip()
+        if doc_id:
+            s = _get_doc_by_id(doc_id)
+            if s and s.exists:
+                d = s.to_dict()
+                d["id"] = s.id
+                want = slugify(d.get("cleanTitle") or d.get("title"))
+                if want and want != slug:
+                    # redirect to canonical slug
+                    return redirect(url_for("read", slug=want, id=s.id), code=301)
+                doc = d
+    if not doc:
+        abort(404)
+
+    doc = ensure_slug(doc)
+    og = {
+        "og_title": doc.get("cleanTitle") or doc.get("title"),
+        "og_desc": doc.get("cleanSummary") or doc.get("excerpt") or doc.get("description") or "Radiant Waves",
+        "og_image": doc.get("imageUrl") or doc.get("image"),
+        "og_url": request.url
+    }
+    return render_template("read.html", article=doc, canonical=request.url, **og)
+
+# ----------------- Redirect (old) → 301 to canonical /read/<slug> -----------------
+@app.get("/r/<doc_id>")
+def r_redirect(doc_id):
+    s = _get_doc_by_id(doc_id)
+    if not s or not s.exists:
+        abort(404)
+    d = s.to_dict()
+    d["id"] = s.id
+    slug = d.get("slug") or slugify(d.get("cleanTitle") or d.get("title"))
+    return redirect(url_for("read", slug=slug, id=s.id), code=301)
+
+# ----------------- Simple sitemap (last 100) -----------------
+@app.get("/sitemap.xml")
+def sitemap():
+    items = coll.order_by("publishedAt", direction=firestore.Query.DESCENDING).limit(100).stream()
+    rows = []
+    for s in items:
+        d = s.to_dict()
+        d["id"] = s.id
+        slug = d.get("slug") or slugify(d.get("cleanTitle") or d.get("title"))
+        url = url_for("read", slug=slug, id=s.id, _external=True)
+        lastmod = (d.get("publishedAt") or datetime.utcnow()).strftime("%Y-%m-%d")
+        rows.append(f"<url><loc>{url}</loc><lastmod>{lastmod}</lastmod></url>")
+    xml = "<?xml version='1.0' encoding='UTF-8'?><urlset xmlns='http://www.sitemaps.org/schemas/sitemap/0.9'>" + "".join(rows) + "</urlset>"
+    return xml, 200, {"Content-Type": "application/xml"}
+
+# ================= FOOTBALL NEWS (European transfers / rumours) =================
+FOOTBALL_FEEDS = [
+    "https://www.skysports.com/rss/12040",     # transfer centre
+    "https://www.skysports.com/rss/11095",     # general football
+    "https://www.espn.com/espn/rss/soccer/news",
+    "https://www.footballtransfers.com/en/rss",
+    "https://www.newsnow.co.uk/h/Sport/Football/Transfer+News?type=rss",
+]
+
+def fetch_football_news(limit_per_feed=6, max_total=30):
+    items = []
+    for url in FOOTBALL_FEEDS:
+        try:
+            feed = feedparser.parse(url)
+            for e in feed.entries[:limit_per_feed]:
+                if getattr(e, "published_parsed", None):
+                    ts = time.mktime(e.published_parsed)
+                else:
+                    ts = time.time()
+                items.append({
+                    "id": e.get("id") or e.get("link"),
+                    "title": e.get("title"),
+                    "summary": (e.get("summary") or "")[:260],
+                    "url": e.get("link"),
+                    "imageUrl": None,
+                    "category": "football",
+                    "source": url,
+                    "ts": ts,
+                })
+        except Exception as ex:
+            log.error("football feed failed for %s: %s", url, ex)
+            continue
+
+    # newest first
+    items.sort(key=lambda x: x["ts"], reverse=True)
+    return items[:max_total]
+
+@app.get("/football")
+def football():
+    items = fetch_football_news()
+    return jsonify({"ok": True, "items": items, "count": len(items)}), 200
+
+# ================= LIVESCORE (ephemeral, no Firestore, no disk) =================
+@app.get("/livescore")
+def livescore():
+    api_base = os.getenv("FOOTBALL_API_BASE", "https://v3.football.api-sports.io")
+    api_key = os.getenv("FOOTBALL_API_KEY")
+    if not api_key:
+        # don't crash, just tell frontend to show "no live matches"
+        return jsonify({"ok": False, "reason": "NO_API_KEY", "items": []}), 200
+
     try:
-        snap = coll.document(docid).get()
-        if not snap.exists:
-            return "Not found", 404
-        url = (snap.to_dict() or {}).get("url") or "/"
-        # You can increment analytics here if needed
-        return redirect(url, code=302)
-    except Exception:
-        log.exception("redirect failed")
-        return "Error", 500
+        r = requests.get(
+            f"{api_base}/fixtures",
+            params={"live": "all"},
+            headers={"x-apisports-key": api_key},
+            timeout=8,
+        )
+        data = r.json()
+        return jsonify({
+            "ok": True,
+            "items": data.get("response", []),
+            "ts": int(time.time())
+        }), 200
+    except Exception as e:
+        log.error("livescore fetch failed: %s", e)
+        return jsonify({"ok": False, "reason": "FETCH_FAILED", "items": []}), 200
 
 # ----------------- Scheduler (runs under gunicorn) -----------------
 import subprocess
