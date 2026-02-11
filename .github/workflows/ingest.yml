@@ -2,30 +2,39 @@ name: Ingest Articles
 
 on:
   schedule:
-    - cron: "*/30 * * * *"   # every 30 mins (UTC)
+    - cron: "*/30 * * * *"   # every 30 minutes (UTC)
   workflow_dispatch: {}
+
+permissions:
+  contents: read
 
 jobs:
   ingest:
     runs-on: ubuntu-latest
+
     env:
       GOOGLE_CLOUD_PROJECT: ${{ secrets.GOOGLE_CLOUD_PROJECT }}
       GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON }}
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
+          token: ${{ secrets.GITHUB_TOKEN }}
           submodules: false
           fetch-depth: 1
+          lfs: false
 
-      - uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install deps
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r ingestor/requirements.txt
 
-      - name: Run ingest
+      - name: Run ingestion
         run: |
           python ingestor/scripts/ingest.py
