@@ -11,6 +11,7 @@ from urllib.parse import (
 import feedparser
 import requests
 from google.cloud import firestore
+from google.oauth2 import service_account
 
 # Optional modern Firestore filter (silences positional-arg warning if available)
 try:
@@ -46,8 +47,31 @@ ALLOW_DEEP_SCRAPE_FEEDS = {"football", "politics", "celebrity"}
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("ingestor")
 
-db = firestore.Client(project=PROJECT_ID) if PROJECT_ID else firestore.Client()
+# ---- Firestore auth (GitHub Actions / Render friendly) ----
+CREDS_JSON = (os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON") or "").strip().strip('"').strip("'")
+CREDS_PATH = (os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or "").strip()
+
+def get_firestore_client():
+    # 1) Preferred: service account JSON stored in env var
+    if CREDS_JSON:
+        info = json.loads(CREDS_JSON)
+        creds = service_account.Credentials.from_service_account_info(info)
+        return firestore.Client(
+            project=PROJECT_ID or info.get("project_id"),
+            credentials=creds
+        )
+
+    # 2) Optional: service account file path (only if you're using a file on a server)
+    if CREDS_PATH and os.path.exists(CREDS_PATH):
+        creds = service_account.Credentials.from_service_account_file(CREDS_PATH)
+        return firestore.Client(project=PROJECT_ID or creds.project_id, credentials=creds)
+
+    # 3) Fallback: ADC (works on GCP; usually NOT on GitHub Actions)
+    return firestore.Client(project=PROJECT_ID) if PROJECT_ID else firestore.Client()
+
+db = get_firestore_client()
 coll = db.collection("articles")
+# -----------------------------------------------------------
 
 # Limit full-page scrapes per run (politeness + speed)
 SCRAPE_BUDGET = 20
