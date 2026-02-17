@@ -143,16 +143,37 @@ a{color:inherit}
 .see-all-btn:hover{border-color:var(--primary);color:var(--primary)}
 
 /* -------- Grids -------- */
-.cards-grid,.section-grid{
-  list-style:none;margin:0;padding:0;display:grid;gap:16px;
-  grid-template-columns:repeat(3,1fr);
+/* Feed + section grids should adapt naturally instead of hard 3/2/1 */
+.cards-grid,
+.section-grid{
+  list-style:none;
+  margin:0;
+  padding:0;
+
+  display:grid;
+  gap:16px;
+
+  /* ✅ fluid: 1 col on small, grows to 2/3 as space allows */
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  align-items: stretch;
 }
-@media (max-width:1024px){
-  .cards-grid,.section-grid{grid-template-columns:repeat(2,1fr)}
+
+/* ✅ guarantee: phones stay 1 column (prevents "3 tiny cards") */
+@media (max-width: 720px){
+  .cards-grid,
+  .section-grid{
+    grid-template-columns: 1fr;
+  }
 }
-@media (max-width:640px){
-  .cards-grid,.section-grid{grid-template-columns:1fr}
+
+/* optional: slightly denser on tablets */
+@media (min-width: 721px) and (max-width: 1100px){
+  .cards-grid,
+  .section-grid{
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
+
 
 /* -------- Card -------- */
 .card{
@@ -248,6 +269,12 @@ a{color:inherit}
 /* Motion preferences */
 @media (prefers-reduced-motion: reduce){
   *{animation-duration:.01ms !important;animation-iteration-count:1 !important;transition:none !important}
+}
+@media (max-width: 720px){
+  .thumb-wrap{height: 180px;}
+}
+@media (max-width: 420px){
+  .thumb-wrap{height: 160px;}
 }
 
 /* Utility */
