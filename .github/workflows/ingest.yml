@@ -17,37 +17,37 @@ jobs:
       RUN_JOBS: "0"
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           submodules: false
           fetch-depth: 1
 
-      - name: Debug - show commit + file header
-        run: |
-          echo "HEAD COMMIT:"
-          git rev-parse HEAD
-          echo "---- first 80 lines of ingestor/main.py ----"
-          sed -n '1,80p' ingestor/main.py
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Install deps
         run: |
           python -m pip install --upgrade pip
           pip install -r ingestor/requirements.txt
 
-      - name: Create GCP credentials file (from secret)
+      - name: Create Google credentials file (from secret)
+        shell: bash
         run: |
-          CREDS_FILE="${RUNNER_TEMP}/gcp-sa.json"
-          printf '%s' "${GOOGLE_APPLICATION_CREDENTIALS_JSON}" > "${CREDS_FILE}"
-          echo "GOOGLE_APPLICATION_CREDENTIALS=${CREDS_FILE}" >> $GITHUB_ENV
-          echo "Wrote creds to ${CREDS_FILE}"
-          python -c "import os, json; p=os.environ.get('GOOGLE_APPLICATION_CREDENTIALS'); print('Creds path:', p); print('Has JSON keys:', list(json.load(open(p)).keys())[:5])"
+          if [ -z "${GOOGLE_APPLICATION_CREDENTIALS_JSON}" ]; then
+            echo "SECRET EMPTY: GOOGLE_APPLICATION_CREDENTIALS_JSON"
+            exit 1
+          fi
 
-      - name: Run ingestion
+          python - <<'PY'
+          import os, pathlib
+          p = pathlib.Path(os.environ["RUNNER_TEMP"]) / "gcp.json"
+          p.write_text(os.environ["GOOGLE_APPLICATION_CREDENTIALS_JSON"], encoding="utf-8")
+          print("CREDS WRITTEN:", p)
+          PY
+
+          echo "GOOGLE_APPLICATION_CREDENTIALS=${RUNNER_TEMP}/gcp.json" >> "$GITHUB_ENV"
+
+      - name: Run ingest
         run: |
           python ingestor/main.py
