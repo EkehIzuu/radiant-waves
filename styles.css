@@ -233,7 +233,7 @@ a{ color:inherit; }
 
 /* Mobile: hide the horizontal nav and show the menu button */
 @media (max-width: 900px){
-  .main-nav-wrap{ display:none; }
+  .main-nav{ display:none; }
   .menu-btn{ display:inline-flex; align-items:center; justify-content:center; }
 }
 
