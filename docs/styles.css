@@ -285,3 +285,19 @@ a{color:inherit}
     grid-template-columns: 1fr !important;
   }
 }
+/* DEBUG OVERRIDE: force single column on mobile */
+@media (max-width: 900px){
+  main.wrap .section ul.section-grid,
+  main.wrap ul.cards-grid,
+  #home ul.section-grid,
+  #results.cards-grid{
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+  }
+
+  /* make each card fill the row */
+  main.wrap .section ul.section-grid > .card,
+  main.wrap ul.cards-grid > .card{
+    width: 100% !important;
+  }
+}
