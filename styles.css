@@ -1,4 +1,4 @@
-/* Radiant Waves — refreshed, brighter, cleaner */
+﻿/* Radiant Waves â€” refreshed, brighter, cleaner */
 :root{
   --primary-color:#ff3d00;      /* energetic orange-red */
   --secondary-color:#0f172a;    /* deep slate */
@@ -15,10 +15,6 @@
   --radius:14px;
   --shadow:0 10px 30px rgba(2,6,23,.10);
   --shadow-soft:0 6px 18px rgba(2,6,23,.08);
-
-  /* Fix missing vars used by share-btn */
-  --gray-light: rgba(226,232,240,.9);
-  --dark: #0b1220;
 }
 
 *{ margin:0; padding:0; box-sizing:border-box; font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif; }
@@ -210,23 +206,22 @@ a{ color:inherit; }
   padding: 24px 0 10px;
 }
 
-/* Feed results grid (#results) */
 .cards-grid{
   list-style:none;
   margin:0;
   padding:0;
   display:grid;
   gap:18px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(3, 1fr);
 }
 @media (max-width: 980px){
-  .cards-grid{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cards-grid{ grid-template-columns: repeat(2, 1fr); }
 }
-@media (max-width: 768px){
+@media (max-width: 640px){
   .cards-grid{ grid-template-columns: 1fr; }
 }
 
-/* Card style */
+/* Card style (keeps your .card/.thumb/etc) */
 .card{
   background: var(--card);
   border-radius: var(--radius);
@@ -296,7 +291,7 @@ a{ color:inherit; }
   overflow:hidden;
 }
 
-/* ---------- Footer ---------- */
+/* ---------- Footer (matches existing structure) ---------- */
 .site-footer{
   background: linear-gradient(180deg, #0b1220, #070b14);
   color: rgba(255,255,255,.92);
@@ -387,7 +382,6 @@ a{ color:inherit; }
 @media (prefers-reduced-motion: reduce){
   *{ animation:none !important; transition:none !important; }
 }
-
 /* ================= HOME TV LAYOUT (new blocks) ================= */
 .home-shell{ display:block; }
 
@@ -485,12 +479,12 @@ a{ color:inherit; }
 /* Top Stories grid (uses simple cards) */
 .top-news-grid{
   display:grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(2, 1fr);
   gap: 14px;
 }
-@media (max-width: 768px){
-  .top-news-grid{
-    grid-template-columns: 1fr;
+@media (max-width: 640px){
+  .top-news-grid{ 
+    display: block; 
   }
 }
 .news-card{
@@ -503,9 +497,6 @@ a{ color:inherit; }
 }
 .news-card:hover{ transform: translateY(-3px); box-shadow: var(--shadow); }
 .news-card img{ width:100%; height: 180px; object-fit:cover; display:block; }
-@media (max-width: 768px){
-  .news-card img{ height: 200px; }
-}
 .news-card-content{ padding: 12px 14px 14px; }
 .news-category{
   color: var(--primary-color);
@@ -606,6 +597,7 @@ a{ color:inherit; }
 .temperature{ font-size: 2.2rem; font-weight: 900; }
 .weather-meta{ color: var(--muted); font-size: .92rem; }
 
+
 /* ================= Match Center ================= */
 .mc-wrap{ margin: 10px 0 30px; }
 .mc-head{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin: 8px 0 12px; }
@@ -689,6 +681,7 @@ a{ color:inherit; }
 }
 .mc-hint{ margin-top:8px; color: var(--muted); font-size:.9rem; }
 
+
 /* ===== Share Button ===== */
 .share-btn{
   border: 1px solid var(--gray-light);
@@ -716,7 +709,12 @@ a{ color:inherit; }
   width: 100%;
 }
 
-/* ================= More Stories (HOME) — SINGLE SOURCE OF TRUTH ================= */
+
+/* Home: rows 1-2 = 2 cols (hero), rows 3+ = 3 cols */
+.rw-more-grid{display:grid !important; grid-template-columns:repeat(3,minmax(0,1fr)) !important; gap:14px !important; width:100% !important; list-style:none; padding:0; margin:14px 0 0;}
+.rw-more-grid  !important;}
+
+/* Full-width More Stories section */
 .rw-more-wrapper{
   grid-column: 1 / -1;
   margin-top: 16px;
@@ -725,41 +723,102 @@ a{ color:inherit; }
   list-style: none;
   padding: 0;
   margin: 14px 0 0;
-
   display: grid;
+  grid-template-columns: repeat(3, minmax(0,1fr));
   gap: 14px;
-  width: 100%;
-
-  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
+.rw-more-grid > .card{ margin: 0; }
+
 @media (max-width: 900px){
-  .rw-more-grid{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
-
-  /* your header hide rules kept */
-  .brand-logo{ display:none; }
-  .search{ display:none; }
-  .header-top{ display:none; }
+  .rw-more-grid{ grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .brand-logo{
+    display: none;
+  }
+  .search{
+    display: none;
+  }
+  .header-top{
+    display: none;
+  }
 }
-@media (max-width: 768px){
+@media (max-width: 560px){
   .rw-more-grid{ grid-template-columns: 1fr; }
 }
-
 /* =========================
    HIDE LIVE BROADCAST ON MOBILE
 ========================= */
 @media (max-width: 768px){
-  .live-broadcast{ display: none !important; }
+  .live-broadcast{
+    display: none !important;
+  }
 }
+/* =========================
+   MOBILE HEADER + SEARCH FIX
+========================= */
+@media (max-width: 768px){
 
+  /* Make header container stack */
+  header,
+  .header,
+  .topbar,
+  .nav,
+  .navbar{
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+  }
+
+  /* Common patterns: brand + nav + search */
+  .nav-inner,
+  .nav-wrap,
+  .header-inner,
+  .topbar-inner{
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 10px !important;
+  }
+
+  /* Nav links wrap nicely */
+  .nav-links,
+  .nav-menu{
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+    justify-content: flex-start !important;
+  }
+
+  /* Search form becomes full width */
+  #searchForm{
+    display: flex !important;
+    gap: 8px !important;
+    width: 100% !important;
+  }
+
+  #q{
+    flex: 1 1 auto !important;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  #searchForm button,
+  #searchForm .btn,
+  #searchForm input[type="submit"]{
+    flex: 0 0 auto !important;
+    white-space: nowrap !important;
+  }
+}
 /* =========================
    MOBILE HEADER + SEARCH FIX (Radiant Waves)
 ========================= */
 @media (max-width: 768px){
+
+  /* Keep header padding clean */
   .site-header .wrap{
     padding-left: 12px !important;
     padding-right: 12px !important;
   }
 
+  /* Top row stacks nicely */
   .header-top-inner{
     display: flex !important;
     flex-direction: column !important;
@@ -767,6 +826,7 @@ a{ color:inherit; }
     gap: 8px !important;
   }
 
+  /* Main header row: STACK brand + search + nav */
   .header-inner{
     display: flex !important;
     flex-direction: column !important;
@@ -774,6 +834,7 @@ a{ color:inherit; }
     gap: 10px !important;
   }
 
+  /* Search form full width and tidy */
   #searchForm.search{
     width: 100% !important;
     display: flex !important;
@@ -794,11 +855,9 @@ a{ color:inherit; }
     white-space: nowrap !important;
   }
 
+  /* Nav becomes a wrap row (no overflow) */
   .site-header nav{
     width: 100% !important;
-    display: flex !important;
-    flex-wrap: wrap !important;
-    gap: 8px !important;
   }
 
   .site-header nav .nav-link{
@@ -807,4 +866,34 @@ a{ color:inherit; }
     gap: 8px !important;
     margin: 0 !important;
   }
+
+  .site-header nav{
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+  }
 }
+/* =========================
+   TOP STORIES → BLOCK ON MOBILE
+========================= */
+@media (max-width: 768px){
+
+  /* Force single column */
+  .top-news-grid{
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 14px !important;
+  }
+
+  /* Ensure each card spans full width */
+  .top-news-grid .news-card{
+    width: 100% !important;
+  }
+
+  /* Make images a bit taller for readability */
+  .news-card img{
+    height: 200px !important;
+  }
+}
+
+
