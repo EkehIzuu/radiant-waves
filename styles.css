@@ -894,17 +894,5 @@ a{ color:inherit; }
   }
 }
 /* ===== Mobile: hide horizontal nav, show drawer button ===== */
-@media (max-width: 900px){
-  /* Hide the entire horizontal nav bar area */
-  .main-nav-wrap{
-    display: none !important;
-  }
 
-  /* Make sure the hamburger button shows */
-  .menu-btn{
-    display: inline-flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-  }
-}
 
