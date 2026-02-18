@@ -279,3 +279,9 @@ a{color:inherit}
 
 /* Utility */
 .hidden{display:none !important}
+@media (max-width: 720px){
+  .section-grid,
+  .cards-grid{
+    grid-template-columns: 1fr !important;
+  }
+}
