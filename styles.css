@@ -233,8 +233,20 @@ a{ color:inherit; }
 
 /* Mobile: hide the horizontal nav and show the menu button */
 @media (max-width: 900px){
-  .main-nav{ display:none; }
+  /* Hide the entire horizontal nav bar area */
+  .main-nav{
+    display: none;
+  }
+
+
+  /* Make sure the hamburger button shows */
+  .menu-btn{
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
   .menu-btn{ display:inline-flex; align-items:center; justify-content:center; }
+}
 }
 
 
