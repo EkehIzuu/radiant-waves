@@ -153,11 +153,11 @@ a{color:inherit}
   display:grid;
   gap:16px;
 
-  /* desktop default */
+  /* Desktop */
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-/* tablet */
+/* Tablet */
 @media (max-width: 1024px){
   .cards-grid,
   .section-grid{
@@ -165,13 +165,14 @@ a{color:inherit}
   }
 }
 
-/* mobile: ALWAYS 1 column */
+/* Mobile */
 @media (max-width: 720px){
   .cards-grid,
   .section-grid{
     grid-template-columns: 1fr;
   }
 }
+
 
 
 /* -------- Card -------- */
