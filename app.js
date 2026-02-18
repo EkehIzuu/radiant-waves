@@ -1461,3 +1461,52 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") safeLoad();
 });
 window.addEventListener("online", () => safeLoad());
+// ---------- Mobile drawer controls ----------
+const menuBtn = document.getElementById("menuBtn");
+const drawer = document.getElementById("mobileDrawer");
+const backdrop = document.getElementById("drawerBackdrop");
+const closeBtn = document.getElementById("drawerClose");
+
+let lastFocusEl = null;
+
+function openDrawer(){
+  if (!drawer || !backdrop || !menuBtn) return;
+  lastFocusEl = document.activeElement;
+
+  backdrop.hidden = false;
+  drawer.classList.add("open");
+  drawer.setAttribute("aria-hidden", "false");
+  menuBtn.setAttribute("aria-expanded", "true");
+  document.body.style.overflow = "hidden";
+
+  // focus first link for accessibility
+  const firstLink = drawer.querySelector("a,button,[tabindex]:not([tabindex='-1'])");
+  firstLink?.focus();
+}
+
+function closeDrawer(){
+  if (!drawer || !backdrop || !menuBtn) return;
+
+  drawer.classList.remove("open");
+  drawer.setAttribute("aria-hidden", "true");
+  menuBtn.setAttribute("aria-expanded", "false");
+  backdrop.hidden = true;
+  document.body.style.overflow = "";
+
+  lastFocusEl?.focus?.();
+}
+
+menuBtn?.addEventListener("click", openDrawer);
+closeBtn?.addEventListener("click", closeDrawer);
+backdrop?.addEventListener("click", closeDrawer);
+
+// Close on ESC
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && drawer?.classList.contains("open")) closeDrawer();
+});
+
+// Close drawer after choosing a nav item
+drawer?.addEventListener("click", (e) => {
+  const a = e.target?.closest?.("a.nav-link");
+  if (a) closeDrawer();
+});
