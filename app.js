@@ -1,10 +1,71 @@
-﻿// app.js
+// app.js
 import {
   API_BASE,
   REFRESH_INTERVAL_MS,
   YOUTUBE_LIVE_ID,
   WEATHER_FALLBACK
 } from "./settings.js";
+
+/* =========================================================
+   SNAPSHOT (Storage-first) + OFFLINE FALLBACK (localStorage)
+   - If you set window.RW_SNAPSHOT_LATEST and window.RW_SNAPSHOT_FEED_BASE
+     in index.html (or later we add to settings.js), Home/Feeds load FAST.
+   - If not set, it falls back to your current API /articles endpoints.
+========================================================= */
+const SNAPSHOT_CFG = {
+  // Example (set these globally):
+  // window.RW_SNAPSHOT_LATEST = "https://storage.googleapis.com/<bucket>/snapshots/latest.json.gz"
+  // window.RW_SNAPSHOT_FEED_BASE = "https://storage.googleapis.com/<bucket>/snapshots/feeds/"
+  latestUrl: (typeof window !== "undefined" && window.RW_SNAPSHOT_LATEST) ? String(window.RW_SNAPSHOT_LATEST) : "",
+  feedBase: (typeof window !== "undefined" && window.RW_SNAPSHOT_FEED_BASE) ? String(window.RW_SNAPSHOT_FEED_BASE) : "",
+  // localStorage keys
+  keyLatest: "rw_snapshot_latest_v1",
+  keyFeedPrefix: "rw_snapshot_feed_v1_",
+};
+
+function snapshotUrlForFeed(feed) {
+  if (!feed) return "";
+  if (!SNAPSHOT_CFG.feedBase) return "";
+  // expects files like: <base>/<feed>.json.gz
+  return `${SNAPSHOT_CFG.feedBase.replace(/\/+$/, "/")}${encodeURIComponent(feed)}.json.gz`;
+}
+
+async function fetchSnapshotGz(url) {
+  // supports .json.gz (Content-Encoding: gzip) and also plain json
+  const u = new URL(url, location.href);
+  u.searchParams.set("_t", String(Date.now())); // avoid stale CDN during testing
+  const res = await fetch(u.toString(), { cache: "no-store" });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+  // Most browsers auto-decompress when server sets Content-Encoding: gzip.
+  // So res.json() usually just works.
+  return res.json();
+}
+
+function saveSnapshotCache(key, payload) {
+  try {
+    localStorage.setItem(key, JSON.stringify(payload));
+  } catch {}
+}
+
+function loadSnapshotCache(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const obj = JSON.parse(raw);
+    return obj && typeof obj === "object" ? obj : null;
+  } catch {
+    return null;
+  }
+}
+
+function setStaleUI(on, meta = "") {
+  // lightweight: show in status (no blank screen)
+  if (!els.status) return;
+  if (on) {
+    els.status.textContent = meta ? `Offline / stale • ${meta}` : "Offline / stale";
+  }
+}
 
 /* =======================
    INFINITE SCROLL CONFIG
@@ -91,21 +152,11 @@ function baseSiteUrl() {
 }
 
 /**
- * INTERNAL ARTICLE URL:
- * We include BOTH:
- * - article=slug-id (pretty)
- * - u=encodedOriginalUrl (so we can fetch full content reliably from backend)
+ * Internal article URL (SSR share page from backend)
  */
-// function internalArticleUrl(a) {
-//   const base = makeSlug(a.slug || a.title || "article");
-//   const id = String(a.id || a.ingestedAt || Date.now());
-//   const src = a.url ? `&u=${encodeURIComponent(a.url)}` : "";
-//   return `${baseSiteUrl()}?article=${encodeURIComponent(`${base}-${id}`)}${src}`;
-// }
 function internalArticleUrl(a) {
-  // Use backend SSR page (has OG tags for sharing)
   if (a?.id) return `${API_BASE}/r/${encodeURIComponent(a.id)}`; // redirects to /read/<slug>?id=<id>
-  return a?.url || "#"; // fallback
+  return a?.url || "#";
 }
 
 function getArticleParams() {
@@ -130,7 +181,7 @@ function clearArticleRoute() {
 }
 
 /* =======================
-   FETCH
+   FETCH (API)
 ======================= */
 async function fetchJSON(u) {
   const url = (u instanceof URL) ? u : new URL(u, API_BASE);
@@ -145,25 +196,91 @@ async function fetchJSONRelaxed(u, fallback = []) {
 }
 
 /* =======================
-   IMAGE PIPE
+   IMAGE PIPE (faster lazy resolve)
 ======================= */
 function proxied(u) { return `${API_BASE}/img?url=${encodeURIComponent(u)}`; }
 
-async function resolveImageFor(imgEl, articleUrl) {
-  try {
-    const { imageUrl } = await fetchJSON(`${API_BASE}/pick_image?url=${encodeURIComponent(articleUrl)}`);
-    if (imageUrl && !isLogoish(imageUrl)) {
-      imgEl.src = proxied(imageUrl);
-      imgEl.dataset.lazy = "0";
-    }
-  } catch {}
+/**
+ * We DO NOT want to call /pick_image for 100 images at once.
+ * We'll only resolve placeholders when they enter viewport.
+ */
+const IMG_PICK_CACHE = new Map(); // articleUrl -> imageUrl
+let imgPickQueue = [];
+let imgPickActive = 0;
+const IMG_PICK_MAX = 4;
+
+function enqueueImagePick(articleUrl, imgEl) {
+  if (!articleUrl || !imgEl) return;
+
+  // already resolved?
+  const cached = IMG_PICK_CACHE.get(articleUrl);
+  if (cached) {
+    imgEl.src = proxied(cached);
+    imgEl.dataset.lazy = "0";
+    return;
+  }
+
+  // avoid duplicate queue entries
+  if (imgEl.dataset._pickQueued === "1") return;
+  imgEl.dataset._pickQueued = "1";
+
+  imgPickQueue.push({ articleUrl, imgEl });
+  pumpImagePickQueue();
 }
+
+async function pumpImagePickQueue() {
+  while (imgPickActive < IMG_PICK_MAX && imgPickQueue.length) {
+    const job = imgPickQueue.shift();
+    if (!job) break;
+
+    const { articleUrl, imgEl } = job;
+
+    // element removed?
+    if (!document.body.contains(imgEl)) continue;
+
+    imgPickActive++;
+    (async () => {
+      try {
+        const { imageUrl } = await fetchJSON(`${API_BASE}/pick_image?url=${encodeURIComponent(articleUrl)}`);
+        if (imageUrl && !isLogoish(imageUrl)) {
+          IMG_PICK_CACHE.set(articleUrl, imageUrl);
+          imgEl.src = proxied(imageUrl);
+          imgEl.dataset.lazy = "0";
+        }
+      } catch {
+        // ignore
+      } finally {
+        imgPickActive--;
+        // allow re-try later if still lazy
+        if (imgEl && imgEl.dataset && imgEl.dataset.lazy === "1") {
+          imgEl.dataset._pickQueued = "0";
+        }
+        pumpImagePickQueue();
+      }
+    })();
+  }
+}
+
+let lazyImgObserver = null;
+function setupLazyImageObserver() {
+  if (lazyImgObserver) return;
+
+  lazyImgObserver = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      if (!e.isIntersecting) continue;
+      const img = e.target;
+      lazyImgObserver.unobserve(img);
+
+      const url = img?.dataset?.articleUrl || "";
+      if (url) enqueueImagePick(url, img);
+    }
+  }, { rootMargin: "600px 0px" });
+}
+
 function hydrateLazyImages(root) {
+  setupLazyImageObserver();
   const imgs = (root || document).querySelectorAll('img[data-lazy="1"]');
-  imgs.forEach(img => {
-    const url = img.dataset.articleUrl;
-    if (url) resolveImageFor(img, url);
-  });
+  imgs.forEach(img => lazyImgObserver.observe(img));
 }
 
 /* =======================
@@ -400,7 +517,6 @@ function normalizeArticlePayload(raw, fallback = {}) {
   const imageUrl = raw?.imageUrl || raw?.image || fallback?.imageUrl || "";
   const summary = stripTags(raw?.summary || raw?.description || fallback?.summary || "");
 
-  // content fields your backend might return
   const contentText =
     stripTags(raw?.content || raw?.body || raw?.text || raw?.article || raw?.html || "");
 
@@ -414,18 +530,15 @@ async function showArticleView(articleKey, sourceUrl = "") {
 
   els.status.textContent = "Loading article…";
 
-  // Hide results; render into home container
   els.results.innerHTML = "";
   els.results.style.display = "none";
   els.home.style.display = "";
 
-  // Minimal fallback object (in case backend returns partial)
   const fallback = { title: articleKey, url: sourceUrl };
 
   const raw = await fetchArticleByUrl(sourceUrl);
   const a = normalizeArticlePayload(raw || {}, fallback);
 
-  // If backend didn’t give image, try pick_image using original url
   let heroImg = a.imageUrl;
   if (!heroImg && sourceUrl) {
     try {
@@ -435,8 +548,6 @@ async function showArticleView(articleKey, sourceUrl = "") {
   }
 
   const heroSrc = heroImg && !isLogoish(heroImg) ? proxied(heroImg) : makePlaceholder("Article");
-
-  // If backend didn't extract content, we still show summary + a "Read original" button
   const hasContent = Boolean((a.contentText || "").trim().length);
 
   els.home.innerHTML = `
@@ -457,6 +568,7 @@ async function showArticleView(articleKey, sourceUrl = "") {
 
       <article style="background:var(--card,#fff);border:1px solid rgba(0,0,0,.06);border-radius:16px;overflow:hidden;box-shadow:var(--shadow,0 12px 30px rgba(0,0,0,.10));">
         <img src="${heroSrc}" alt="" style="width:100%;height:360px;object-fit:cover;display:block;"
+             loading="lazy" decoding="async"
              onerror="this.src='${makePlaceholder("Article")}';">
 
         <div style="padding:16px 16px 18px;">
@@ -496,7 +608,6 @@ async function showArticleView(articleKey, sourceUrl = "") {
   const backBtn = document.getElementById("rwBackBtn");
   if (backBtn) {
     backBtn.addEventListener("click", () => {
-      // If user came directly from a shared link, just go home
       clearArticleRoute();
       currentView = "home";
       currentFeed = "";
@@ -640,16 +751,73 @@ function mixByFeed(items, feeds) {
   return final;
 }
 
+/* =========================================================
+   STORAGE SNAPSHOT LOADERS
+   - Home: latest.json.gz (one fast hit)
+   - Feed: feeds/<feed>.json.gz (one fast hit)
+   - If snapshot fails -> localStorage -> offline/stale UI
+========================================================= */
+async function loadHomeSnapshot(perLimit) {
+  if (!SNAPSHOT_CFG.latestUrl) return null;
+
+  try {
+    const payload = await fetchSnapshotGz(SNAPSHOT_CFG.latestUrl);
+    if (payload && Array.isArray(payload.items)) {
+      saveSnapshotCache(SNAPSHOT_CFG.keyLatest, payload);
+      return payload;
+    }
+  } catch {}
+  return null;
+}
+
+async function loadFeedSnapshot(feed) {
+  const url = snapshotUrlForFeed(feed);
+  if (!url) return null;
+
+  try {
+    const payload = await fetchSnapshotGz(url);
+    if (payload && Array.isArray(payload.items)) {
+      saveSnapshotCache(SNAPSHOT_CFG.keyFeedPrefix + feed, payload);
+      return payload;
+    }
+  } catch {}
+  return null;
+}
+
 async function loadHome() {
   stopInfiniteScroll();
-
   els.status.textContent = "Loading…";
 
   const per = Math.max(6, Math.min(homeLoadedLimit, HOME_LIMIT));
-  const lists = await Promise.all(
-    HOME_FEEDS.map(feed => fetchJSONRelaxed(`${API_BASE}/articles?feed=${feed}&limit=${per}`, []))
-  );
-  const all = lists.flat();
+
+  // 1) FAST PATH: snapshot latest
+  let snapshot = await loadHomeSnapshot(per);
+  let usedStale = false;
+
+  // 2) Fallback: localStorage snapshot
+  if (!snapshot) {
+    const cached = loadSnapshotCache(SNAPSHOT_CFG.keyLatest);
+    if (cached && Array.isArray(cached.items) && cached.items.length) {
+      snapshot = cached;
+      usedStale = true;
+    }
+  }
+
+  // 3) If still nothing: old API method (your current way)
+  let all = [];
+  if (snapshot && Array.isArray(snapshot.items)) {
+    all = snapshot.items.slice(0, Math.max(20, per * 3)); // enough pool to mix
+    if (usedStale) setStaleUI(true, "showing last saved snapshot");
+    else setStaleUI(false);
+  } else {
+    // If snapshots not configured, or failed completely, use API calls
+    const lists = await Promise.all(
+      HOME_FEEDS.map(feed => fetchJSONRelaxed(`${API_BASE}/articles?feed=${feed}&limit=${per}`, []))
+    );
+    all = lists.flat();
+    setStaleUI(!navigator.onLine, "live fetch failed");
+  }
+
   all.sort((a,b) => new Date(b.publishedAt||b.ingestedAt||0) - new Date(a.publishedAt||a.ingestedAt||0));
   const mixed = mixByFeed(all, HOME_FEEDS);
   els.status.textContent = "";
@@ -716,14 +884,14 @@ async function loadHome() {
         const feed = escapeHtml((a.feed || "").toUpperCase() || "TOP");
         return `
           <article class="news-card">
-            <a target="_blank" rel="noopener" rel="noopener" aria-label="${escapeHtml(title)}">
+            <a href="${internalArticleUrl(a)}" rel="noopener" aria-label="${escapeHtml(title)}">
               <img src="${img}" alt="" loading="lazy" decoding="async"
                    ${(!a.imageUrl || isLogoish(a.imageUrl)) ? `data-lazy="1" data-article-url="${escapeHtml(a.url || "")}"` : ""}>
             </a>
             <div class="news-card-content">
               <div class="news-category">${feed}</div>
               <h3>
-                <a target="_blank" rel="noopener" rel="noopener" style="text-decoration:none;color:inherit;">
+                <a href="${internalArticleUrl(a)}" rel="noopener" style="text-decoration:none;color:inherit;">
                   ${escapeHtml(title)}
                 </a>
               </h3>
@@ -746,7 +914,7 @@ async function loadHome() {
         return `
           <li style="display:flex;gap:10px;align-items:flex-start;justify-content:space-between;">
             <div style="min-width:0;">
-              <a target="_blank" rel="noopener" rel="noopener" style="font-weight:800;color:#111;text-decoration:none;">
+              <a href="${internalArticleUrl(a)}" rel="noopener" style="font-weight:800;color:#111;text-decoration:none;">
                 ${escapeHtml(title)}
               </a>
               <div class="small" style="margin-top:4px;color:#666;font-size:13px;">
@@ -921,26 +1089,68 @@ async function loadFeed({ append = false } = {}) {
   if (currentView === "match-center") return;
 
   const q = els.q.value.trim();
-
   if (!append) loadedLimit = PAGE_SIZE;
 
-  const url = new URL(`${API_BASE}/articles`);
-  if (q) url.searchParams.set("q", q);
-  if (currentFeed) url.searchParams.set("feed", currentFeed);
-  url.searchParams.set("limit", String(Math.min(loadedLimit, MAX_LIMIT)));
+  // SEARCH must hit backend (reliability)
+  const isSearch = Boolean(q);
 
   if (!append) els.status.textContent = "Loading…";
 
-  const items = await fetchJSONRelaxed(url, []);
+  let items = [];
+
+  // 1) If not searching and we have snapshots: load feed snapshot
+  if (!isSearch && currentFeed) {
+    let snap = await loadFeedSnapshot(currentFeed);
+    let usedStale = false;
+
+    if (!snap) {
+      const cached = loadSnapshotCache(SNAPSHOT_CFG.keyFeedPrefix + currentFeed);
+      if (cached && Array.isArray(cached.items) && cached.items.length) {
+        snap = cached;
+        usedStale = true;
+      }
+    }
+
+    if (snap && Array.isArray(snap.items)) {
+      items = snap.items.slice(0, Math.min(loadedLimit, MAX_LIMIT));
+      if (usedStale) setStaleUI(true, "showing last saved snapshot");
+      else setStaleUI(false);
+    }
+  }
+
+  // 2) Fallback: current API method (and always for search)
+  if (!items.length) {
+    const url = new URL(`${API_BASE}/articles`);
+    if (q) url.searchParams.set("q", q);
+    if (currentFeed) url.searchParams.set("feed", currentFeed);
+    url.searchParams.set("limit", String(Math.min(loadedLimit, MAX_LIMIT)));
+
+    items = await fetchJSONRelaxed(url, []);
+    if (!items.length && !navigator.onLine) setStaleUI(true, "offline");
+  }
+
   const label = FEED_TITLES[currentFeed] || (q ? "Results" : "News");
 
   els.home.innerHTML = "";
   els.home.style.display = "none";
 
-  els.results.innerHTML = items.map(a => cardHtml(a, { sectionLabel: label })).join("");
+  // NOTE: when append=true, we should append new cards instead of overwrite
+  const html = items.map(a => cardHtml(a, { sectionLabel: label })).join("");
+
+  if (append && els.results.innerHTML) {
+    els.results.innerHTML = html; // snapshot/API already returns full list up to limit
+  } else {
+    els.results.innerHTML = html;
+  }
+
   els.results.style.display = "";
 
-  if (!items.length) renderEmptyState(els.results, "Nothing to show yet.");
+  if (!items.length) {
+    renderEmptyState(els.results, "Nothing to show yet.");
+    // extra clarity: don’t leave blank
+    if (!navigator.onLine) setStaleUI(true, "no cached data");
+  }
+
   hydrateLazyImages(els.results);
 
   els.status.textContent = q ? `${items.length} result(s)` : `${items.length} latest`;
@@ -1363,7 +1573,6 @@ async function safeLoad() {
   try {
     closeAllShareMenus();
 
-    // ✅ ARTICLE ROUTE FIRST
     const { key, srcUrl } = getArticleParams();
     if (key) {
       await showArticleView(key, srcUrl);
@@ -1394,8 +1603,6 @@ async function safeLoad() {
 els.navLinks.forEach(link => {
   link.addEventListener("click", (e) => {
     e.preventDefault();
-
-    // clear article route if user clicks nav
     clearArticleRoute();
 
     if (link.dataset.view === "match-center") {
@@ -1436,18 +1643,6 @@ document.addEventListener("click", (e) => {
   openShareMenu(btn);
 });
 
-// ✅ Intercept internal article clicks to avoid “refresh back to home”
-document.addEventListener("click", (e) => {
-  const a = e.target.closest('a[href*="?article="]');
-  if (!a) return;
-
-  // only same-origin internal links
-  if (!a.href.startsWith(location.origin)) return;
-
-  e.preventDefault();
-  navigateTo(a.getAttribute("href"));
-});
-
 // ✅ Handle browser back/forward
 window.addEventListener("popstate", () => safeLoad());
 
@@ -1461,7 +1656,8 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") safeLoad();
 });
 window.addEventListener("online", () => safeLoad());
-// ---------- Mobile drawer controls ----------
+
+/* ---------- Mobile drawer controls ---------- */
 const menuBtn = document.getElementById("menuBtn");
 const drawer = document.getElementById("mobileDrawer");
 const backdrop = document.getElementById("drawerBackdrop");
@@ -1479,7 +1675,6 @@ function openDrawer(){
   menuBtn.setAttribute("aria-expanded", "true");
   document.body.style.overflow = "hidden";
 
-  // focus first link for accessibility
   const firstLink = drawer.querySelector("a,button,[tabindex]:not([tabindex='-1'])");
   firstLink?.focus();
 }
@@ -1500,12 +1695,10 @@ menuBtn?.addEventListener("click", openDrawer);
 closeBtn?.addEventListener("click", closeDrawer);
 backdrop?.addEventListener("click", closeDrawer);
 
-// Close on ESC
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && drawer?.classList.contains("open")) closeDrawer();
 });
 
-// Close drawer after choosing a nav item
 drawer?.addEventListener("click", (e) => {
   const a = e.target?.closest?.("a.nav-link");
   if (a) closeDrawer();
