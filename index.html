@@ -6,8 +6,19 @@
   <title>Radiant Waves</title>
   <link rel="icon" type="image/png" href="img/Radiantwaves nobg.png" />
 
-  <!-- Font Awesome (for icons used in template/footer) -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- ✅ Speed: preconnect to your slow domains -->
+  <link rel="preconnect" href="https://radiant-waves-1.onrender.com" crossorigin>
+  <link rel="preconnect" href="https://storage.googleapis.com" crossorigin>
+  <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
+
+  <!-- ✅ Speed: non-blocking Font Awesome -->
+  <link rel="preload" as="style"
+        href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+        onload="this.onload=null;this.rel='stylesheet'">
+  <noscript>
+    <link rel="stylesheet"
+          href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  </noscript>
 
   <!-- Existing status pill styles (kept) -->
   <style>
@@ -22,27 +33,9 @@
     .rw-status.stale   { background: rgba(153,98,12,.9); }
   </style>
 
-  <!-- Your main stylesheet -->
+  <!-- ✅ Speed: preload your CSS -->
+  <link rel="preload" href="styles.css" as="style">
   <link rel="stylesheet" href="styles.css" />
-
-  <!-- =========================================================
-       SNAPSHOT CONFIG (Firebase Storage / GCS)
-       Set these to your Storage public URLs.
-
-       latest snapshot (home):
-         - should be a JSON (optionally gzipped) with shape:
-           { "generatedAt": "...", "items": [ ...articles... ] }
-
-       feed snapshots:
-         - base folder contains:
-           politics.json.gz, football.json.gz, celebrity.json.gz
-           each with { "generatedAt": "...", "items": [ ... ] }
-  ========================================================== -->
-  <script>
-    // ✅ CHANGE THESE TWO LINES AFTER YOU UPLOAD SNAPSHOTS
-    window.RW_SNAPSHOT_LATEST = "";      // e.g. "https://storage.googleapis.com/<bucket>/snapshots/latest.json.gz"
-    window.RW_SNAPSHOT_FEED_BASE = "";   // e.g. "https://storage.googleapis.com/<bucket>/snapshots/feeds/"
-  </script>
 </head>
 
 <body>
@@ -199,8 +192,7 @@
     setInterval(updateDateTime, 60000);
   </script>
 
-  <!-- app modules -->
-  <script type="module" src="settings.js"></script>
+  <!-- ✅ app module (settings.js is imported inside app.js already, so don't load it twice) -->
   <script type="module" src="app.js"></script>
 </body>
 </html>
