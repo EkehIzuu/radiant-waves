@@ -7,6 +7,8 @@ os.environ.setdefault("GRPC_TRACE", "")
 import re
 import json
 import time
+import gzip
+import hashlib
 import logging
 from datetime import datetime, timezone
 from urllib.parse import urlparse, urljoin
@@ -22,16 +24,32 @@ from google.api_core.exceptions import ResourceExhausted
 # ----------------- Config -----------------
 PROJECT_ID = (os.getenv("GOOGLE_CLOUD_PROJECT") or "").strip()
 FETCH_WINDOW = int(os.getenv("FETCH_WINDOW", "500"))  # newest docs window for /articles
+
 FALLBACK_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
-PICKER_VERSION = "v4"   # image picker build marker
+
+PICKER_VERSION = "v5-snapshots"   # bump marker
+
+# Disk cache (fallback if Firestore quota fails)
 CACHE_PATH = os.path.join(os.path.dirname(__file__), "cache_articles.json")
 
 # Gate the scheduler so it runs in exactly ONE process
 RUN_JOBS = os.getenv("RUN_JOBS", "0") == "1"
-_MEM_TTL = int(os.getenv("MEM_TTL_SECONDS", "60"))  # default 60s
+
+# Memory cache TTLs
+_MEM_TTL = int(os.getenv("MEM_TTL_SECONDS", "90"))  # general /articles TTL
+_PICK_TTL = int(os.getenv("PICK_CACHE_SECONDS", "86400"))  # pick_image TTL
+
+# ✅ SNAPSHOT URLs (public GCS/Firebase Storage URLs)
+# Example:
+#   SNAPSHOT_LATEST_URL=https://storage.googleapis.com/<bucket>/snapshots/latest.json.gz
+#   SNAPSHOT_FEED_BASE=https://storage.googleapis.com/<bucket>/snapshots/feeds/
+SNAPSHOT_LATEST_URL = (os.getenv("SNAPSHOT_LATEST_URL") or "").strip()
+SNAPSHOT_FEED_BASE = (os.getenv("SNAPSHOT_FEED_BASE") or "").strip().rstrip("/") + "/" if os.getenv("SNAPSHOT_FEED_BASE") else ""
+SNAPSHOT_TTL = int(os.getenv("SNAPSHOT_TTL_SECONDS", "90"))  # how often backend refetches snapshot
+
 # ------------------------------------------
 
 # Flask
@@ -77,9 +95,12 @@ def doc_to_public(d):
             out[k] = v.isoformat()
     return out
 
+def _sha1(s: str) -> str:
+    return hashlib.sha1(s.encode("utf-8")).hexdigest()
+
 # ---------- Ensure imageUrl/image_url for outbound articles ----------
 def ensure_image_fields(d: dict) -> dict:
-    """Guarantee imageUrl/image_url on an article dict by pulling from DB or page."""
+    """Guarantee imageUrl/image_url on an article dict by pulling from page (expensive)."""
     url = d.get("url") or d.get("link")
     img = d.get("imageUrl") or d.get("image_url") or d.get("image")
 
@@ -152,16 +173,13 @@ def add_cors(resp):
     resp.headers["Access-Control-Allow-Methods"] = "GET, HEAD, OPTIONS, POST"
     resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
 
-    if request.path.startswith("/articles"):
-        resp.headers["Cache-Control"] = "no-store, max-age=0"
-        resp.headers["Pragma"] = "no-cache"
-        resp.headers["Expires"] = "0"
+    # Allow short caching for lists (frontend already cache-busts with _t)
+    if request.path.startswith("/articles") or request.path.startswith("/search_articles"):
+        resp.headers["Cache-Control"] = "public, max-age=30"
     elif request.path.startswith("/img"):
         resp.headers["Cache-Control"] = "public, max-age=86400"
     elif request.path.startswith(("/pick_image", "/latest")):
-        resp.headers["Cache-Control"] = "no-store, max-age=0"
-        resp.headers["Pragma"] = "no-cache"
-        resp.headers["Expires"] = "0"
+        resp.headers["Cache-Control"] = "public, max-age=60"
     return resp
 
 # ----------------- Root (simple info) -----------------
@@ -170,6 +188,10 @@ def root():
     return jsonify({
         "ok": True,
         "service": "radiant-waves",
+        "snapshots": {
+            "latest": bool(SNAPSHOT_LATEST_URL),
+            "feedBase": bool(SNAPSHOT_FEED_BASE),
+        },
         "endpoints": [
             "/articles",
             "/search_articles",
@@ -186,36 +208,132 @@ def root():
         ]
     })
 
-# ----------------- Tiny in-memory TTL cache -----------------
-_MEM = {"articles": {"ts": 0.0, "payload": []}}
+# =========================================================
+# SNAPSHOT FETCH (public GCS URLs) + TTL memory cache
+# =========================================================
+_SNAP_MEM = {
+    "latest": {"ts": 0.0, "payload": None},
+    "feeds": {},  # feed -> {ts, payload}
+}
 
-def _mem_get():
+def _snapshot_url_for_feed(feed: str) -> str:
+    if not feed or not SNAPSHOT_FEED_BASE:
+        return ""
+    return f"{SNAPSHOT_FEED_BASE}{feed}.json.gz"
+
+def _maybe_gunzip_bytes(b: bytes) -> bytes:
+    # If payload is already JSON, return as-is; otherwise try gzip
+    if not b:
+        return b
+    # gzip magic number
+    if len(b) >= 2 and b[0] == 0x1F and b[1] == 0x8B:
+        try:
+            return gzip.decompress(b)
+        except Exception:
+            return b
+    return b
+
+def _fetch_snapshot_payload(url: str) -> dict | None:
+    if not url:
+        return None
+    try:
+        # Add cache-buster to avoid stale edge caches during testing
+        u = url + ("&" if "?" in url else "?") + "_t=" + str(int(time.time()))
+        r = requests.get(u, timeout=10, headers={"User-Agent": FALLBACK_USER_AGENT, "Accept": "application/json,*/*"})
+        if r.status_code >= 400:
+            return None
+
+        # requests usually auto-decompress when Content-Encoding: gzip,
+        # but if it's a .json.gz served as bytes, this covers it.
+        raw = r.content
+        raw2 = _maybe_gunzip_bytes(raw)
+
+        try:
+            data = json.loads(raw2.decode("utf-8"))
+        except Exception:
+            # fallback: maybe requests already decoded and r.text is JSON
+            try:
+                data = r.json()
+            except Exception:
+                return None
+
+        if not isinstance(data, dict) or "items" not in data or not isinstance(data.get("items"), list):
+            return None
+        return data
+    except Exception:
+        return None
+
+def _get_snapshot_latest() -> dict | None:
+    if not SNAPSHOT_LATEST_URL:
+        return None
     now = time.time()
-    if now - _MEM["articles"]["ts"] <= _MEM_TTL:
-        return _MEM["articles"]["payload"]
+    cached = _SNAP_MEM["latest"]
+    if cached["payload"] is not None and (now - cached["ts"] <= SNAPSHOT_TTL):
+        return cached["payload"]
+    data = _fetch_snapshot_payload(SNAPSHOT_LATEST_URL)
+    if data:
+        cached["payload"] = data
+        cached["ts"] = now
+    return cached["payload"]
+
+def _get_snapshot_feed(feed: str) -> dict | None:
+    if not feed:
+        return None
+    url = _snapshot_url_for_feed(feed)
+    if not url:
+        return None
+
+    bucket = _SNAP_MEM["feeds"].setdefault(feed, {"ts": 0.0, "payload": None})
+    now = time.time()
+    if bucket["payload"] is not None and (now - bucket["ts"] <= SNAPSHOT_TTL):
+        return bucket["payload"]
+
+    data = _fetch_snapshot_payload(url)
+    if data:
+        bucket["payload"] = data
+        bucket["ts"] = now
+    return bucket["payload"]
+
+# ----------------- Tiny in-memory TTL cache for /articles results -----------------
+_MEM = {}  # key -> {ts, payload}
+
+def _mem_key(feed: str | None, q: str | None) -> str:
+    f = (feed or "").strip().lower()
+    qq = (q or "").strip().lower()
+    return f"{f}||{qq}"
+
+def _mem_get_articles(feed: str | None, q: str | None):
+    k = _mem_key(feed, q)
+    obj = _MEM.get(k)
+    if not obj:
+        return None
+    if time.time() - obj["ts"] <= _MEM_TTL:
+        return obj["payload"]
     return None
 
-def _mem_set(payload):
-    _MEM["articles"]["payload"] = payload
-    _MEM["articles"]["ts"] = time.time()
+def _mem_set_articles(feed: str | None, q: str | None, payload):
+    k = _mem_key(feed, q)
+    _MEM[k] = {"ts": time.time(), "payload": payload}
 
-# ----------------- Articles API -----------------
+# =========================================================
+# Articles API (Snapshot-first → Firestore → disk cache)
+# =========================================================
 @app.route("/articles", methods=["GET", "OPTIONS"])
 def list_articles():
     if request.method == "OPTIONS":
         return ("", 204)
 
-    feed = request.args.get("feed")
+    feed = (request.args.get("feed") or "").strip()
     q = (request.args.get("q") or "").strip().lower()
     cache_only = request.args.get("cache") == "1"
 
-    # limit logic: browse vs search
     is_search = bool(q)
     try:
         raw_limit = int(request.args.get("limit", 0))
     except Exception:
         raw_limit = 0
 
+    # limit logic
     if is_search:
         limit = min(raw_limit or 50, 500)
         window = min(max(limit, 200), FETCH_WINDOW)
@@ -223,60 +341,70 @@ def list_articles():
         limit = min(raw_limit or 150, 150)
         window = FETCH_WINDOW
 
-    # Fast path: honor cache-only flag
+    # 0) Disk cache only
     if cache_only:
         docs = _read_cache()
         resp = jsonify(docs[:limit])
-        resp.headers["X-From-Cache"] = "1"
-        resp.headers["X-Mem-Cache"] = "0"
+        resp.headers["X-Source"] = "disk"
         return resp
 
-    # In-memory TTL cache (avoid hammering Firestore on hot path)
-    mem = _mem_get()
-    if mem is not None and not is_search and not feed:
+    # 1) Memory cache (works for feed too now)
+    mem = _mem_get_articles(feed, q)
+    if mem is not None:
         resp = jsonify(mem[:limit])
-        resp.headers["X-From-Cache"] = "1"
-        resp.headers["X-Mem-Cache"] = "1"
+        resp.headers["X-Source"] = "mem"
         return resp
 
-    from_cache = False
-    docs = []
+    # 2) SNAPSHOT-first (FAST) for non-search (home + feeds)
+    if not is_search:
+        snap_payload = None
+        if feed:
+            snap_payload = _get_snapshot_feed(feed.lower())
+        else:
+            snap_payload = _get_snapshot_latest()
 
-    # Primary: Firestore (fail fast, then fallback)
+        if snap_payload and isinstance(snap_payload.get("items"), list) and snap_payload["items"]:
+            items = snap_payload["items"]
+
+            # Snapshot items are already public json
+            # Ensure newest-first (use ingestedAt/publishedAt)
+            def _k(d):
+                return _parse_ts_maybe(d.get("ingestedAt") or d.get("publishedAt"))
+            items.sort(key=_k, reverse=True)
+
+            # Write memory cache
+            _mem_set_articles(feed, q, items)
+
+            resp = jsonify(items[:limit])
+            resp.headers["X-Source"] = "snapshot"
+            resp.headers["X-Snapshot-At"] = str(snap_payload.get("generatedAt") or "")
+            return resp
+
+    # 3) Firestore (fallback)
+    docs = []
+    from_cache = False
+
     try:
         qref = coll.order_by("ingestedAt", direction=firestore.Query.DESCENDING).limit(window)
-
-        # Fail fast: disable client retries and cap per-RPC time
         for _doc in qref.stream(retry=None, timeout=10):
             d = _doc.to_dict()
-            d["id"] = _doc.id  # include stable id for Zapier/redirects
+            d["id"] = _doc.id
             docs.append(d)
 
-        # Update disk cache
         public_rows = [doc_to_public(d) for d in docs]
         _write_cache(public_rows)
 
     except ResourceExhausted as e:
-        log.warning("Firestore quota exceeded, serving cache: %s", e)
+        log.warning("Firestore quota exceeded, serving disk cache: %s", e)
         docs = _read_cache()
         from_cache = True
-        if not docs:
-            resp = jsonify([])
-            resp.headers["X-From-Cache"] = "1"
-            resp.headers["X-Mem-Cache"] = "0"
-            return resp
 
     except Exception as e:
-        log.warning("Firestore fetch failed, using cache: %s", e)
+        log.warning("Firestore fetch failed, using disk cache: %s", e)
         docs = _read_cache()
         from_cache = True
-        if not docs:
-            resp = jsonify([])
-            resp.headers["X-From-Cache"] = "1"
-            resp.headers["X-Mem-Cache"] = "0"
-            return resp
 
-    # Optional filters
+    # filters
     if feed:
         docs = [d for d in docs if (d.get("feed") or "").lower() == feed.lower()]
     if q:
@@ -287,23 +415,17 @@ def list_articles():
             or q in tl(d.get("summary"))
         ]
 
-    # Ensure newest-first
-    def key(d):
-        return _parse_ts_maybe(d.get("ingestedAt") or d.get("publishedAt"))
+    # sort newest-first
+    docs.sort(key=lambda d: _parse_ts_maybe(d.get("ingestedAt") or d.get("publishedAt")), reverse=True)
 
-    docs.sort(key=key, reverse=True)
-
-    # Public transform if not from cache file
     if not from_cache:
         docs = [doc_to_public(d) for d in docs]
 
-    # Write in-memory cache for normal browse (no filters/search)
-    if not is_search and not feed and not from_cache:
-        _mem_set(docs)
+    # write memory cache for next hit
+    _mem_set_articles(feed, q, docs)
 
     resp = jsonify(docs[:limit])
-    resp.headers["X-From-Cache"] = "1" if from_cache else "0"
-    resp.headers["X-Mem-Cache"] = "1" if (mem is not None and not is_search and not feed) else "0"
+    resp.headers["X-Source"] = "disk" if from_cache else "firestore"
     return resp
 
 # ----------------- Backend Search (full Firestore or cache) -----------------
@@ -320,7 +442,6 @@ def search_articles():
     from_cache = False
 
     try:
-        # Pull deeper than normal browse
         qref = coll.order_by("ingestedAt", direction=firestore.Query.DESCENDING).limit(800)
         for _doc in qref.stream(retry=None, timeout=10):
             d = _doc.to_dict()
@@ -366,13 +487,11 @@ def proxy_image():
             "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
             "Referer": f"{p.scheme}://{p.netloc}/",
         }
-        # stream to avoid loading the whole file into RAM
         r = requests.get(raw, headers=headers, timeout=(5, 10), allow_redirects=True, stream=True)
         if r.status_code >= 400:
             return ("Image fetch failed", 502)
 
         ct = r.headers.get("Content-Type", "image/jpeg")
-        # optional safety: cap ~5MB
         max_bytes = 5 * 1024 * 1024
         sent = 0
 
@@ -390,7 +509,7 @@ def proxy_image():
     except Exception:
         return ("Image proxy error", 502)
 
-# ----------------- Image picker -----------------
+# ----------------- Image picker (with cache) -----------------
 _LOGOISH = re.compile(r"(logo|favicon|sprite|placeholder|default|brand|og[-_]?default)", re.I)
 _GOOD_EXT = (".jpg", ".jpeg", ".png", ".webp", ".bmp")
 _BAD_HOST_BITS = (
@@ -405,6 +524,20 @@ _BAD_HOST_BITS = (
     "stats.wp.com",
     "facebook.com/tr",
 )
+
+# Cache: url -> {ts, img}
+_PICK_CACHE = {}
+
+def _pick_cache_get(url: str):
+    obj = _PICK_CACHE.get(url)
+    if not obj:
+        return None
+    if time.time() - obj["ts"] <= _PICK_TTL:
+        return obj["img"]
+    return None
+
+def _pick_cache_set(url: str, img: str):
+    _PICK_CACHE[url] = {"ts": time.time(), "img": img or ""}
 
 def _looks_like_logo(u):
     s = (u or "").lower()
@@ -468,60 +601,39 @@ def _extract_from_meta_and_dom(html, page_url):
     urls = []
     amp_url = None
 
-    # meta tags
     for m in re.finditer(
         r'<meta[^>]+(?:property|name|itemprop)=["\'](?:og:image(?::(?:secure_url|url))?|twitter:image(?::src)?|image)["\'][^>]+content=["\']([^"\']+)["\']',
         html, re.I
     ):
         urls.append(m.group(1))
 
-    # <link rel="image_src">
     m = re.search(r'<link[^>]+rel=["\']image_src["\'][^>]+href=["\']([^"\']+)["\']', html, re.I)
     if m:
         urls.append(m.group(1))
 
-    # srcset
     for m in re.finditer(r'<(?:source|img)[^>]+srcset=["\']([^"\']+)["\']', html, re.I):
         cand = _pick_from_srcset(m.group(1))
         if cand:
             urls.append(cand)
+
     for m in re.finditer(r'<(?:source|img)[^>]+data-srcset=["\']([^"\']+)["\']', html, re.I):
         cand = _pick_from_srcset(m.group(1))
         if cand:
             urls.append(cand)
 
-    # <figure> and general <img>
     for m in re.finditer(r'<figure[^>]*>.*?<img[^>]+src=["\']([^"\']+)["\']', html, re.I | re.S):
         urls.append(m.group(1))
+
     for m in re.finditer(r'<img[^>]+src=["\']([^"\']+)["\']', html, re.I):
         urls.append(m.group(1))
 
-    # lazy data-*
     for m in re.finditer(r'<img[^>]+data-(?:src|original|lazy|lazy-src)=["\']([^"\']+)["\']', html, re.I):
         urls.append(m.group(1))
 
-    # CSS background images
-    for m in re.finditer(r'background-image\s*:\s*url\((["\']?)([^"\')]+)\1\)', html, re.I):
-        urls.append(m.group(2))
-
-    # noscript blocks
-    for nm in re.finditer(r'<noscript[^>]*>(.*?)</noscript>', html, re.I | re.S):
-        part = nm.group(1) or ""
-        for m in re.finditer(r'<img[^>]+src=["\']([^"\']+)["\']', part, re.I):
-            urls.append(m.group(1))
-        for m in re.finditer(r'<img[^>]+data-(?:src|original|lazy|lazy-src)=["\']([^"\']+)["\']', part, re.I):
-            urls.append(m.group(1))
-        for m in re.finditer(r'<(?:source|img)[^>]+srcset=["\']([^"\']+)["\']', part, re.I):
-            cand = _pick_from_srcset(m.group(1))
-            if cand:
-                urls.append(cand)
-
-    # AMP
     amp = re.search(r'<link[^>]+rel=["\']amphtml["\'][^>]+href=["\']([^"\']+)["\']', html, re.I)
     if amp:
         amp_url = (amp.group(1) or "").strip()
 
-    # absolutize/protocol-fix
     abs_urls = []
     for u in urls:
         if not u:
@@ -578,29 +690,14 @@ def _head_big_enough(url):
     except Exception:
         return False
 
-def _site_specific(page_url, html):
-    """Hard rules for known CMS/sites (example: Sidearm/Sports pages)."""
-    host = (urlparse(page_url).netloc or "").lower()
-    hlow = html.lower()
-
-    if "frostburgsports.com" in host or "sidearmsports" in hlow:
-        m = re.search(r'property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', html, re.I)
-        if m:
-            u = m.group(1).strip()
-            if u.startswith("//"): u = "https:" + u
-            if not u.startswith(("http://", "https://")): u = urljoin(page_url, u)
-            return u
-        m = re.search(r'<img[^>]+class=["\'][^"\']*(roster|headshot|profile)[^"\']*["\'][^>]+(?:data-src|src)=["\']([^"\']+)["\']', html, re.I)
-        if m:
-            u = m.group(2).strip()
-            if u.startswith("//"): u = "https:" + u
-            if not u.startswith(("http://", "https://")): u = urljoin(page_url, u)
-            return u
-    return None
-
 def _pick_image_from_page(page_url, timeout=15):
     if not page_url:
         return None
+
+    cached = _pick_cache_get(page_url)
+    if cached is not None:
+        return cached or None
+
     try:
         r = requests.get(
             page_url,
@@ -609,24 +706,20 @@ def _pick_image_from_page(page_url, timeout=15):
             allow_redirects=True,
         )
     except Exception:
+        _pick_cache_set(page_url, "")
         return None
+
     if r.status_code != 200 or not r.text:
+        _pick_cache_set(page_url, "")
         return None
 
     html = r.text
 
-    # 0) site-specific hook
-    special = _site_specific(page_url, html)
-    if special and _is_good_image_candidate(special) and _head_big_enough(special):
-        return special
-
-    # 1) generic extraction
     cands = []
     cands += _extract_from_jsonld(html)
     meta_urls, amp_url = _extract_from_meta_and_dom(html, page_url)
     cands += meta_urls
 
-    # 2) AMP, if present
     if amp_url:
         try:
             if amp_url.startswith("//"):
@@ -645,7 +738,6 @@ def _pick_image_from_page(page_url, timeout=15):
         except Exception:
             pass
 
-    # 3) clean/filter/dedupe + pick
     cleaned = []
     seen = set()
     for u in cands:
@@ -669,7 +761,10 @@ def _pick_image_from_page(page_url, timeout=15):
 
     for u in cleaned[:12]:
         if _head_big_enough(u):
+            _pick_cache_set(page_url, u)
             return u
+
+    _pick_cache_set(page_url, "")
     return None
 
 @app.get("/pick_image")
@@ -677,14 +772,15 @@ def pick_image():
     page_url = (request.args.get("url") or "").strip()
     if not page_url:
         return jsonify({"version": PICKER_VERSION, "imageUrl": ""}), 400
+
     u = _pick_image_from_page(page_url) or ""
-    # final safety: never return analytics/pixel hosts
     try:
         host = (urlparse(u).netloc or "").lower()
         if any(b in host for b in _BAD_HOST_BITS):
             u = ""
     except Exception:
         u = ""
+
     return jsonify({"version": PICKER_VERSION, "imageUrl": u}), 200
 
 # ----------------- Diag / Health -----------------
@@ -699,6 +795,8 @@ def diag():
         "cacheMtime": None,
         "hasDoc": False,
         "sampleCount": 0,
+        "snapshotLatest": SNAPSHOT_LATEST_URL or "",
+        "snapshotFeedBase": SNAPSHOT_FEED_BASE or "",
     }
     try:
         if os.path.exists(CACHE_PATH):
@@ -734,14 +832,13 @@ def latest():
         for _doc in qref.stream(retry=None, timeout=10):
             d = _doc.to_dict()
             d["id"] = _doc.id
-            d = ensure_image_fields(d)  # ensure imageUrl/image_url present
+            d = ensure_image_fields(d)
             d = ensure_slug(d)
             out.append(doc_to_public(d))
         if not out:
             return jsonify({"ok": False, "error": "no_articles"}), 404
         return jsonify({"ok": True, "article": out[0]}), 200
     except ResourceExhausted:
-        # graceful fallback to cache top item
         docs = _read_cache()
         if docs:
             return jsonify({"ok": True, "article": docs[0]}), 200
@@ -750,16 +847,15 @@ def latest():
         log.exception("latest failed")
         return jsonify({"ok": False, "error": str(e)}), 500
 
-# ----------------- SSR: /read/<slug> (first-party article page) -----------------
+# ----------------- SSR: /read/<slug> -----------------
 @app.get("/read/<slug>")
 def read(slug):
-    # try slug first
     snap = _get_doc_by_slug(slug)
     doc = None
     if snap:
         doc = snap.to_dict()
         doc["id"] = snap.id
-    # fallback via ?id=
+
     if not doc:
         doc_id = request.args.get("id", "").strip()
         if doc_id:
@@ -769,9 +865,9 @@ def read(slug):
                 d["id"] = s.id
                 want = slugify(d.get("cleanTitle") or d.get("title"))
                 if want and want != slug:
-                    # redirect to canonical slug
                     return redirect(url_for("read", slug=want, id=s.id), code=301)
                 doc = d
+
     if not doc:
         abort(404)
 
@@ -784,7 +880,7 @@ def read(slug):
     }
     return render_template("read.html", article=doc, canonical=request.url, **og)
 
-# ----------------- Redirect (old) → 301 to canonical /read/<slug> -----------------
+# ----------------- Redirect → canonical /read/<slug> -----------------
 @app.get("/r/<doc_id>")
 def r_redirect(doc_id):
     s = _get_doc_by_id(doc_id)
@@ -810,10 +906,10 @@ def sitemap():
     xml = "<?xml version='1.0' encoding='UTF-8'?><urlset xmlns='http://www.sitemaps.org/schemas/sitemap/0.9'>" + "".join(rows) + "</urlset>"
     return xml, 200, {"Content-Type": "application/xml"}
 
-# ================= FOOTBALL NEWS (European transfers / rumours) =================
+# ================= FOOTBALL NEWS =================
 FOOTBALL_FEEDS = [
-    "https://www.skysports.com/rss/12040",     # transfer centre
-    "https://www.skysports.com/rss/11095",     # general football
+    "https://www.skysports.com/rss/12040",
+    "https://www.skysports.com/rss/11095",
     "https://www.espn.com/espn/rss/soccer/news",
     "https://www.footballtransfers.com/en/rss",
     "https://www.newsnow.co.uk/h/Sport/Football/Transfer+News?type=rss",
@@ -842,8 +938,6 @@ def fetch_football_news(limit_per_feed=6, max_total=30):
         except Exception as ex:
             log.error("football feed failed for %s: %s", url, ex)
             continue
-
-    # newest first
     items.sort(key=lambda x: x["ts"], reverse=True)
     return items[:max_total]
 
@@ -852,13 +946,12 @@ def football():
     items = fetch_football_news()
     return jsonify({"ok": True, "items": items, "count": len(items)}), 200
 
-# ================= LIVESCORE (ephemeral, no Firestore, no disk) =================
+# ================= LIVESCORE =================
 @app.get("/livescore")
 def livescore():
     api_base = os.getenv("FOOTBALL_API_BASE", "https://v3.football.api-sports.io")
     api_key = os.getenv("FOOTBALL_API_KEY")
     if not api_key:
-        # don't crash, just tell frontend to show "no live matches"
         return jsonify({"ok": False, "reason": "NO_API_KEY", "items": []}), 200
 
     try:
@@ -885,14 +978,12 @@ from atexit import register
 
 def run_ingest_job():
     log.info("🚀 Ingest job starting…")
-    # call your separate script so logic stays isolated
     subprocess.run(["python", "scripts/ingest.py"], check=False)
     log.info("✅ Ingest job finished")
 
 if RUN_JOBS:
     try:
         _sched = BackgroundScheduler(daemon=True, timezone="UTC")
-        # Align exactly at :00 and :30 every hour
         _sched.add_job(run_ingest_job, "cron", minute="0,30")
         _sched.start()
         log.info("🕒 Scheduler started (cron at :00/:30 UTC)")
