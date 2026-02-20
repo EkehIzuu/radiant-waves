@@ -1,8 +1,11 @@
+# main.py (FINAL — put this in REPO ROOT)
 import os
 import re
 import json
+import gzip
 import logging
 from datetime import datetime, timezone
+from typing import Optional, List, Dict, Any
 from urllib.parse import (
     urljoin, urlparse, parse_qs, unquote,
     urlunparse, urlencode, parse_qsl
@@ -11,6 +14,10 @@ from urllib.parse import (
 import feedparser
 import requests
 from google.cloud import firestore
+from google.oauth2 import service_account
+
+# Firebase Storage (GCS) client
+from google.cloud import storage
 
 # Optional modern Firestore filter (silences positional-arg warning if available)
 try:
@@ -20,6 +27,14 @@ except Exception:
 
 # ----------------- Config -----------------
 PROJECT_ID = (os.getenv("GOOGLE_CLOUD_PROJECT") or "").strip()
+
+# Firebase Storage bucket (Cloud Storage for Firebase)
+FIREBASE_STORAGE_BUCKET = (os.getenv("FIREBASE_STORAGE_BUCKET") or "").strip()
+
+# Snapshot settings
+SNAPSHOT_LIMIT_HOME = int(os.getenv("SNAPSHOT_LIMIT_HOME", "150"))          # latest combined
+SNAPSHOT_LIMIT_PER_FEED = int(os.getenv("SNAPSHOT_LIMIT_PER_FEED", "200"))  # per feed
+SNAPSHOT_ARCHIVE = os.getenv("SNAPSHOT_ARCHIVE", "1").strip() == "1"        # keep timestamp copies too
 
 FALLBACK_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -39,15 +54,54 @@ FEEDS = {
     ],
 }
 
-# Allow deep-scrape for all feeds (was {"football"} before)
+# Allow deep-scrape for all feeds
 ALLOW_DEEP_SCRAPE_FEEDS = {"football", "politics", "celebrity"}
 # ------------------------------------------
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("ingestor")
 
-db = firestore.Client(project=PROJECT_ID) if PROJECT_ID else firestore.Client()
+# ---- Firestore auth (Render / GitHub Actions friendly) ----
+CREDS_JSON = (os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON") or "").strip().strip('"').strip("'")
+CREDS_PATH = (os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or "").strip()
+
+
+def _load_credentials():
+    """
+    Returns (credentials, project_id_from_creds) or (None, None) to use ADC.
+    """
+    # 1) service account JSON in env
+    if CREDS_JSON:
+        info = json.loads(CREDS_JSON)
+        return service_account.Credentials.from_service_account_info(info), info.get("project_id")
+
+    # 2) service account file path
+    if CREDS_PATH and os.path.exists(CREDS_PATH):
+        creds = service_account.Credentials.from_service_account_file(CREDS_PATH)
+        pid = getattr(creds, "project_id", None)
+        return creds, pid
+
+    # 3) ADC
+    return None, None
+
+
+def get_firestore_client():
+    creds, pid = _load_credentials()
+    if creds:
+        return firestore.Client(project=PROJECT_ID or pid, credentials=creds)
+    return firestore.Client(project=PROJECT_ID) if PROJECT_ID else firestore.Client()
+
+
+def get_storage_client():
+    creds, pid = _load_credentials()
+    if creds:
+        return storage.Client(project=PROJECT_ID or pid, credentials=creds)
+    return storage.Client(project=PROJECT_ID) if PROJECT_ID else storage.Client()
+
+
+db = get_firestore_client()
 coll = db.collection("articles")
+# -----------------------------------------------------------
 
 # Limit full-page scrapes per run (politeness + speed)
 SCRAPE_BUDGET = 20
@@ -63,12 +117,21 @@ _BAD_HOST_BITS = (
     "quantserve.com",
     "pixel.wp.com",
     "stats.wp.com",
-    "facebook.com",  # don't include path here; we match host only
+    "facebook.com",
 )
 
 
 def dt_utc_now():
     return datetime.now(timezone.utc)
+
+
+def iso(dt):
+    try:
+        if isinstance(dt, datetime):
+            return dt.astimezone(timezone.utc).isoformat()
+    except Exception:
+        pass
+    return ""
 
 
 def parse_published(entry):
@@ -121,7 +184,6 @@ def looks_like_logo(u: str) -> bool:
         "logo", "favicon", "sprite", "placeholder", "default",
         "brandmark", "opengraph-default", "apple-touch-icon",
         "mask-icon", "site-icon",
-        # extra placeholders commonly seen
         "generic_image_missing", "generic-image-missing", "image_missing",
         "image-missing", "noimage", "no-image", "missingimage", "missing-image",
         "blank"
@@ -139,7 +201,6 @@ def _good_article_url(u: str) -> bool:
             return False
         if not p.netloc:
             return False
-        # Prefer URLs that actually have an article path (not just domain root)
         return bool(p.path and p.path != "/")
     except Exception:
         return False
@@ -147,12 +208,7 @@ def _good_article_url(u: str) -> bool:
 
 def resolve_real_link(entry, link: str) -> str:
     """
-    For Google News URLs, try hard to recover the publisher article URL:
-      - url= param in the link
-      - non-google hrefs in entry.links
-      - url= param in those hrefs
-      - anchors in summary HTML
-    Falls back to original link if nothing better found.
+    For Google News URLs, try hard to recover the publisher article URL.
     """
     link = unwrap_google_redirect(link)
     try:
@@ -161,7 +217,7 @@ def resolve_real_link(entry, link: str) -> str:
         host = ""
 
     if "news.google.com" in host:
-        candidates = []
+        candidates: List[str] = []
 
         # 1) url= in the link itself
         try:
@@ -171,7 +227,7 @@ def resolve_real_link(entry, link: str) -> str:
         except Exception:
             pass
 
-        # 2) from entry.links (unwrap, check url= too)
+        # 2) from entry.links
         for l in (entry.get("links") or []):
             h = (l.get("href") if isinstance(l, dict) else None) or ""
             if not h:
@@ -184,7 +240,6 @@ def resolve_real_link(entry, link: str) -> str:
             if "news.google.com" not in lh and h.startswith("http"):
                 candidates.append(h)
             else:
-                # maybe this also has url=
                 try:
                     q2 = parse_qs(urlparse(h).query)
                     if "url" in q2 and q2["url"]:
@@ -192,7 +247,7 @@ def resolve_real_link(entry, link: str) -> str:
                 except Exception:
                     pass
 
-        # 3) <a href="..."> in summary HTML
+        # 3) anchors in summary html
         for href in re.findall(r'href=["\'](https?://[^"\']+)["\']', entry.get("summary") or "", re.I):
             href = unwrap_google_redirect(href)
             try:
@@ -209,12 +264,9 @@ def resolve_real_link(entry, link: str) -> str:
                 except Exception:
                     pass
 
-        # Prefer candidates with a real article path
         for c in candidates:
             if _good_article_url(c):
                 return c
-
-        # else, if we found anything at all, return first
         if candidates:
             return candidates[0]
 
@@ -228,7 +280,6 @@ def _normalize_image_url(u: str) -> str:
     try:
         p = urlparse(u)
         q = dict(parse_qsl(p.query, keep_blank_values=True))
-        # Upscale common CDN params gently
         for key in ("w", "width"):
             if key in q:
                 try:
@@ -241,7 +292,6 @@ def _normalize_image_url(u: str) -> str:
                     q[key] = str(max(int(q[key]), 675))
                 except Exception:
                     pass
-        # Strip obvious trackers (leave itok intact)
         for k in ("utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content"):
             q.pop(k, None)
         return urlunparse(p._replace(query=urlencode(q)))
@@ -278,7 +328,6 @@ def _head_ok(url: str, session: requests.Session) -> bool:
         clen = int(r.headers.get("Content-Length", "0") or "0")
         if ct.startswith("image/") and clen >= _MIN_BYTES:
             return True
-        # fallback: try a tiny GET to verify content-type without downloading full image
         rg = session.get(
             url,
             headers={"User-Agent": FALLBACK_USER_AGENT, "Range": "bytes=0-4096"},
@@ -288,7 +337,6 @@ def _head_ok(url: str, session: requests.Session) -> bool:
         ctg = (rg.headers.get("Content-Type") or "").lower()
         return ctg.startswith("image/")
     except Exception:
-        # be permissive if everything fails
         return True
 
 
@@ -303,11 +351,10 @@ def _fetch_html(url: str, session: requests.Session) -> str:
     return r.text
 
 
-def _extract_from_jsonld(html: str):
-    urls = []
+def _extract_from_jsonld(html: str) -> List[str]:
+    urls: List[str] = []
     if not html:
         return urls
-    # Lightweight regex capture of JSON-LD blocks
     for m in re.finditer(r'<script[^>]+application/ld\+json[^>]*>(.*?)</script>', html, re.I | re.S):
         try:
             data = json.loads(m.group(1))
@@ -337,24 +384,24 @@ def _extract_from_jsonld(html: str):
     return urls
 
 
-def _extract_from_meta_and_dom(html: str, page_url: str):
-    urls = []
+def _extract_from_meta_and_dom(html: str, page_url: str) -> List[str]:
+    urls: List[str] = []
     if not html:
         return urls
 
-    # 1) OG/Twitter/meta (+ secure_url variants)
+    # OG/Twitter/meta
     for m in re.finditer(
         r'<meta[^>]+(?:property|name)=["\'](?:og:image(?::secure_url|:url)?|twitter:image(?::src)?)["\'][^>]+content=["\']([^"\']+)["\']',
         html, re.I
     ):
         urls.append(m.group(1))
 
-    # 2) <link rel="image_src">
+    # <link rel="image_src">
     m = re.search(r'<link[^>]+rel=["\']image_src["\'][^>]+href=["\']([^"\']+)["\']', html, re.I)
     if m:
         urls.append(m.group(1))
 
-    # 3) srcset / data-srcset (pick largest)
+    # srcset/data-srcset
     for m in re.finditer(r'<(?:source|img)[^>]+srcset=["\']([^"\']+)["\']', html, re.I):
         cand = _pick_from_srcset(m.group(1))
         if cand:
@@ -364,21 +411,21 @@ def _extract_from_meta_and_dom(html: str, page_url: str):
         if cand:
             urls.append(cand)
 
-    # 4) <figure> first <img>, then general <img>
+    # <figure> first <img>, then general <img>
     for m in re.finditer(r'<figure[^>]*>.*?<img[^>]+src=["\']([^"\']+)["\']', html, re.I | re.S):
         urls.append(m.group(1))
     for m in re.finditer(r'<img[^>]+src=["\']([^"\']+)["\']', html, re.I):
         urls.append(m.group(1))
 
-    # 5) lazy data-* (data-src, data-original, data-lazy, data-lazy-src)
+    # lazy data-*
     for m in re.finditer(r'<img[^>]+data-(?:src|original|lazy|lazy-src)=["\']([^"\']+)["\']', html, re.I):
         urls.append(m.group(1))
 
-    # 6) CSS background-image URLs in inline styles
+    # CSS background-image
     for m in re.finditer(r'background-image\s*:\s*url\((["\']?)([^"\')]+)\1\)', html, re.I):
         urls.append(m.group(2))
 
-    # 7) <noscript> blocks often contain real <img>
+    # <noscript>
     for nm in re.finditer(r'<noscript[^>]*>(.*?)</noscript>', html, re.I | re.S):
         part = nm.group(1) or ""
         for m in re.finditer(r'<img[^>]+src=["\']([^"\']+)["\']', part, re.I):
@@ -390,12 +437,11 @@ def _extract_from_meta_and_dom(html: str, page_url: str):
             if cand:
                 urls.append(cand)
 
-    # 8) AMP link (we'll fetch later if present)
+    # AMP link (marker so caller can fetch AMP)
     amp = re.search(r'<link[^>]+rel=["\']amphtml["\'][^>]+href=["\']([^"\']+)["\']', html, re.I)
     amp_url = (amp.group(1) or "").strip() if amp else None
 
-    # absolutize/protocol-fix
-    abs_urls = []
+    abs_urls: List[str] = []
     for u in urls:
         if not u:
             continue
@@ -406,7 +452,6 @@ def _extract_from_meta_and_dom(html: str, page_url: str):
             u = urljoin(page_url, u)
         abs_urls.append(u)
 
-    # stash AMP marker (so caller can fetch AMP page)
     if amp_url:
         if amp_url.startswith("//"):
             amp_url = "https:" + amp_url
@@ -423,16 +468,12 @@ def extract_football_specific_image(article_url, html):
         domain = (urlparse(article_url).netloc or "").lower()
 
         site_patterns = [
-            # ESPN
             (r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', ['espn.com']),
             (r'<img[^>]+class=["\'][^"\']*article-image[^"\']*["\'][^>]+src=["\']([^"\']+)["\']', ['espn.com']),
-            # BBC Sport
             (r'<meta[^>]+name=["\']twitter:image["\'][^>]+content=["\']([^"\']+)["\']', ['bbc.co.uk','bbc.com']),
             (r'<div[^>]+class=["\'][^"\']*sp-o-media-wrapper[^"\']*["\'][^>]*>.*?<img[^>]+src=["\']([^"\']+)["\']', ['bbc.co.uk','bbc.com']),
-            # Sky Sports
             (r'<figure[^>]+class=["\'][^"\']*sdc-site-image[^"\']*["\'][^>]*>.*?<img[^>]+src=["\']([^"\']+)["\']', ['skysports.com']),
             (r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', ['skysports.com']),
-            # General sports/CMS
             (r'<div[^>]+class=["\'][^"\']*article-featured-image[^"\']*["\'][^>]*>.*?<img[^>]+src=["\']([^"\']+)["\']', []),
             (r'<img[^>]+class=["\'][^"\']*wp-post-image[^"\']*["\'][^>]+src=["\']([^"\']+)["\']', []),
             (r'<div[^>]+class=["\'][^"\']*hero-image[^"\']*["\'][^>]*>.*?<img[^>]+src=["\']([^"\']+)["\']', []),
@@ -459,8 +500,7 @@ def extract_football_specific_image(article_url, html):
 
 def deep_pick_image(article_url: str, session=None):
     """
-    Fetch the article (and AMP page if present) and pick a real content image
-    (non-logo, likely large). Uses JSON-LD, OG/Twitter, <figure>, srcset.
+    Fetch the article (and AMP page if present) and pick a real content image.
     """
     sess = session or requests.Session()
     try:
@@ -474,11 +514,11 @@ def deep_pick_image(article_url: str, session=None):
     if foot_img:
         return foot_img
 
-    cands = []
+    cands: List[str] = []
     cands += _extract_from_jsonld(html)
     cands += _extract_from_meta_and_dom(html, article_url)
 
-    # If AMP href included, fetch AMP page too
+    # AMP fetch
     amp_hrefs = [u for u in cands if u.endswith("#__AMP_FETCH__")]
     if amp_hrefs:
         try:
@@ -488,8 +528,8 @@ def deep_pick_image(article_url: str, session=None):
         except Exception as e:
             log.info("AMP fetch error: %s -> %s", article_url, e)
 
-    # Clean/normalize/dedupe
-    cleaned = []
+    # Clean/dedupe
+    cleaned: List[str] = []
     seen = set()
     for u in cands:
         if not u or u.startswith("data:"):
@@ -507,13 +547,11 @@ def deep_pick_image(article_url: str, session=None):
         seen.add(key)
         if looks_like_logo(u):
             continue
-        # skip tracker/pixel hosts
         if any(b in host for b in _BAD_HOST_BITS):
             continue
         cleaned.append(u)
 
-    # Prefer candidates that pass size/type checks
-    for u in cleaned[:10]:  # cap small number for speed
+    for u in cleaned[:10]:  # speed cap
         if _head_ok(u, sess):
             return u
 
@@ -521,17 +559,8 @@ def deep_pick_image(article_url: str, session=None):
 
 
 def fetch_og_image(page_url: str, timeout=8):
-    """
-    Fetch page and extract an image via common patterns:
-      - <meta property="og:image"> / og:image:secure_url / og:image:url
-      - <meta name="twitter:image"> / twitter:image:src
-      - <link rel="image_src" href="...">
-      - (last resort) first <img src="...">
-    Returns absolute URL or None.
-    """
     if not page_url:
         return None
-
     try:
         r = requests.get(
             page_url,
@@ -554,7 +583,6 @@ def fetch_og_image(page_url: str, timeout=8):
 
     html = r.text
 
-    # 1) Meta tags
     pat1 = re.compile(
         r'<meta[^>]+(?:property|name)=["\'](?:og:image(?::(?:secure_url|url))?|twitter:image(?::src)?)["\'][^>]+content=["\']([^"\']+)["\']',
         re.I,
@@ -573,7 +601,6 @@ def fetch_og_image(page_url: str, timeout=8):
         if u.startswith(("http://", "https://")) and not looks_like_logo(u):
             return u
 
-    # 2) <link rel="image_src" href="...">
     m = re.search(r'<link[^>]+rel=["\']image_src["\'][^>]+href=["\']([^"\']+)["\']', html, re.I)
     if m:
         u = m.group(1).strip()
@@ -584,7 +611,6 @@ def fetch_og_image(page_url: str, timeout=8):
         if u.startswith(("http://", "https://")) and not looks_like_logo(u):
             return u
 
-    # 3) First <img src="...">
     m = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', html, re.I)
     if m:
         u = m.group(1).strip()
@@ -601,38 +627,29 @@ def fetch_og_image(page_url: str, timeout=8):
 
 def find_image_in_entry(entry, feed_name: str):
     """
-    Best-effort image finder:
-      1) media:thumbnail / media:content
-      2) enclosure links that are images
-      3) <img> in summary/content (src, data-src, data-original, data-lazy-src, srcset)
-      4) Fallback:
-         - for ALLOW_DEEP_SCRAPE_FEEDS: deep page scrape (JSON-LD, OG/Twitter, <figure>, srcset, AMP, football-specific)
-         - else: OG/Twitter meta scrape first, then deep as last resort
+    Best-effort image finder.
     """
-    # 1) media:* fields
+    # 1) media:*
     for t in (entry.get("media_thumbnail") or []):
         u = (t.get("url") if isinstance(t, dict) else None)
         if u and str(u).startswith(("http://", "https://")) and not looks_like_logo(u):
-            log.info("IMG via media_thumbnail: %s", u)
             return u
     for c in (entry.get("media_content") or []):
         u = (c.get("url") if isinstance(c, dict) else None)
         if u and str(u).startswith(("http://", "https://")) and not looks_like_logo(u):
-            log.info("IMG via media_content: %s", u)
             return u
 
-    # 2) image enclosures
+    # 2) enclosures
     for l in (entry.get("links") or []):
         if isinstance(l, dict) and l.get("rel") == "enclosure":
             ctype = str(l.get("type", "")).lower()
             if ctype.startswith("image/"):
                 u = l.get("href")
                 if u and str(u).startswith(("http://", "https://")) and not looks_like_logo(u):
-                    log.info("IMG via enclosure: %s", u)
                     return u
 
-    # 3) parse HTML for images (lazy attributes + srcset)
-    html_chunks = []
+    # 3) parse html chunks
+    html_chunks: List[str] = []
     if entry.get("summary"):
         html_chunks.append(entry["summary"])
     sd = entry.get("summary_detail") or {}
@@ -663,31 +680,26 @@ def find_image_in_entry(entry, feed_name: str):
             return False
         return True
 
-    IMG_SRC_RE  = re.compile(r'<img[^>]+src=["\']([^"\']+)["\']', re.I)
+    IMG_SRC_RE = re.compile(r'<img[^>]+src=["\']([^"\']+)["\']', re.I)
     IMG_DATA_RE = re.compile(r'<img[^>]+data-(?:src|original|lazy-src)=["\']([^"\']+)["\']', re.I)
-    SRCSET_RE   = re.compile(r'srcset=["\']([^"\']+)["\']', re.I)
+    SRCSET_RE = re.compile(r'srcset=["\']([^"\']+)["\']', re.I)
 
     for html in html_chunks:
         if not html:
             continue
-
         candidates = []
         candidates += IMG_SRC_RE.findall(html)
         candidates += IMG_DATA_RE.findall(html)
-
         for srcset in SRCSET_RE.findall(html):
-            # choose largest candidate from srcset
             best = _pick_from_srcset(srcset)
             if best:
                 candidates.append(best)
-
         for raw in candidates:
             u = norm(raw)
             if ok(u):
-                log.info("IMG via HTML parse: %s", u)
                 return u
 
-    # 4) Fallback: deep or OG scrape (respect budget)
+    # 4) fallback scrape (budget)
     if link:
         global SCRAPE_BUDGET
         if SCRAPE_BUDGET > 0:
@@ -698,23 +710,17 @@ def find_image_in_entry(entry, feed_name: str):
                     with requests.Session() as s:
                         img = deep_pick_image(link, s)
                     if img and ok(img):
-                        log.info("IMG via DEEP scrape: %s", img)
                         return img
-                    # deep failed — try OG
                     img2 = fetch_og_image(link)
                     if img2 and ok(img2):
-                        log.info("IMG via OG scrape: %s", img2)
                         return img2
                 else:
-                    # Try OG first; if it fails, try deep as last resort
                     img2 = fetch_og_image(link)
                     if img2 and ok(img2):
-                        log.info("IMG via OG scrape: %s", img2)
                         return img2
                     with requests.Session() as s:
                         img = deep_pick_image(link, s)
                     if img and ok(img):
-                        log.info("IMG via DEEP scrape: %s", img)
                         return img
             except Exception as e:
                 log.info("Fallback image error: %s", e)
@@ -722,7 +728,7 @@ def find_image_in_entry(entry, feed_name: str):
     return None
 
 
-def upsert_article(doc):
+def upsert_article(doc: Dict[str, Any]) -> bool:
     """
     Upsert by URL (one doc per URL). Only set ingestedAt when the URL is NEW.
     """
@@ -730,7 +736,6 @@ def upsert_article(doc):
     if not url:
         return False
 
-    # Look up by URL
     if FieldFilter:
         existing = list(coll.where(filter=FieldFilter("url", "==", url)).limit(1).stream())
     else:
@@ -744,20 +749,110 @@ def upsert_article(doc):
             doc["ingestedAt"] = dt_utc_now()
         coll.document(existing[0].id).set(doc, merge=True)
         return True
-    else:
-        doc["ingestedAt"] = dt_utc_now()
-        coll.add(doc)
-        return True
+
+    doc["ingestedAt"] = dt_utc_now()
+    coll.add(doc)
+    return True
 
 
+# =========================
+# SNAPSHOT BUILD + UPLOAD
+# =========================
+def _serialize_article(d: dict) -> dict:
+    """Keep snapshots small and stable."""
+    return {
+        "feed": d.get("feed", ""),
+        "source": d.get("source", ""),
+        "title": d.get("title", ""),
+        "summary": d.get("summary", ""),
+        "url": d.get("url", ""),
+        "publishedAt": iso(d.get("publishedAt")),
+        "ingestedAt": iso(d.get("ingestedAt")),
+        "imageUrl": d.get("imageUrl", ""),
+    }
+
+
+def _query_latest(limit: int, feed: Optional[str] = None) -> List[dict]:
+    q = coll.order_by("ingestedAt", direction=firestore.Query.DESCENDING).limit(limit)
+    if feed:
+        if FieldFilter:
+            q = coll.where(filter=FieldFilter("feed", "==", feed)) \
+                    .order_by("ingestedAt", direction=firestore.Query.DESCENDING) \
+                    .limit(limit)
+        else:
+            q = coll.where("feed", "==", feed) \
+                    .order_by("ingestedAt", direction=firestore.Query.DESCENDING) \
+                    .limit(limit)
+    return [doc.to_dict() or {} for doc in q.stream()]
+
+
+def _gzip_bytes(payload: dict) -> bytes:
+    raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return gzip.compress(raw, compresslevel=9)
+
+
+def _upload_gz(storage_client: storage.Client, bucket_name: str, path: str, gz_bytes: bytes, cache_seconds: int = 60):
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(path)
+    blob.cache_control = f"public, max-age={cache_seconds}"
+    blob.content_type = "application/json"
+    blob.content_encoding = "gzip"
+    blob.upload_from_string(gz_bytes)
+    log.info("Uploaded snapshot: gs://%s/%s (%d bytes gz)", bucket_name, path, len(gz_bytes))
+
+
+def build_and_upload_snapshots():
+    if not FIREBASE_STORAGE_BUCKET:
+        log.warning("FIREBASE_STORAGE_BUCKET not set — skipping snapshot upload.")
+        return
+
+    log.info("Building snapshots...")
+    storage_client = get_storage_client()
+    now = dt_utc_now()
+    ts = now.strftime("%Y%m%d-%H%M%S")
+
+    # 1) Home snapshot (latest across all feeds)
+    home_docs = _query_latest(SNAPSHOT_LIMIT_HOME, feed=None)
+    home_payload = {
+        "generatedAt": iso(now),
+        "count": len(home_docs),
+        "items": [_serialize_article(d) for d in home_docs],
+    }
+    home_gz = _gzip_bytes(home_payload)
+    _upload_gz(storage_client, FIREBASE_STORAGE_BUCKET, "snapshots/latest.json.gz", home_gz, cache_seconds=60)
+
+    if SNAPSHOT_ARCHIVE:
+        _upload_gz(storage_client, FIREBASE_STORAGE_BUCKET, f"snapshots/archive/latest-{ts}.json.gz", home_gz, cache_seconds=31536000)
+
+    # 2) Per-feed snapshots
+    for feed in FEEDS.keys():
+        docs = _query_latest(SNAPSHOT_LIMIT_PER_FEED, feed=feed)
+        payload = {
+            "generatedAt": iso(now),
+            "feed": feed,
+            "count": len(docs),
+            "items": [_serialize_article(d) for d in docs],
+        }
+        gz = _gzip_bytes(payload)
+        _upload_gz(storage_client, FIREBASE_STORAGE_BUCKET, f"snapshots/feeds/{feed}.json.gz", gz, cache_seconds=60)
+
+        if SNAPSHOT_ARCHIVE:
+            _upload_gz(storage_client, FIREBASE_STORAGE_BUCKET, f"snapshots/archive/feeds/{feed}-{ts}.json.gz", gz, cache_seconds=31536000)
+
+    log.info("Snapshots done.")
+
+
+# =========================
+# INGEST
+# =========================
 def ingest():
-    logging.info("Starting ingestion run")
+    log.info("Starting ingestion run")
     written = skipped = 0
 
     for feed_name, urls in FEEDS.items():
         urls = urls if isinstance(urls, (list, tuple)) else [urls]
         for feed_url in urls:
-            logging.info(f"Fetching feed: {feed_url} ({feed_name})")
+            log.info("Fetching feed: %s (%s)", feed_url, feed_name)
             parsed = feedparser.parse(feed_url)
 
             for e in parsed.entries:
@@ -792,7 +887,13 @@ def ingest():
                 else:
                     skipped += 1
 
-    logging.info(f"Ingestion done. written={written} skipped={skipped}")
+    log.info("Ingestion done. written=%d skipped=%d", written, skipped)
+
+    # snapshots after ingestion
+    try:
+        build_and_upload_snapshots()
+    except Exception as ex:
+        log.exception("Snapshot build/upload failed: %s", ex)
 
 
 if __name__ == "__main__":
