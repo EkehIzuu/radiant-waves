@@ -10,3 +10,4 @@ google-auth
 google-auth-oauthlib
 APScheduler==3.10.4
 tzlocal==5.2
+google-cloud-core>=2.3.0
