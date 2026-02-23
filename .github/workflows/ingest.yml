@@ -19,28 +19,62 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          submodules: false
           fetch-depth: 1
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # ✅ wipe problematic google namespace packages that cause "unknown location"
-      - name: Clean conflicting google packages
+      # ✅ Catch the #1 silent killer: local google/ or google.py shadowing the real package
+      - name: Check for local google shadowing
+        shell: bash
+        run: |
+          echo "=== Searching for local 'google' that can shadow imports ==="
+          find . -maxdepth 4 -type d -name "google" -print || true
+          find . -maxdepth 6 -type f -name "google.py" -print || true
+          echo "==========================================================="
+
+      - name: Install deps (clean google namespace)
         run: |
           python -m pip install --upgrade pip
-          pip uninstall -y google google-cloud || true
-          pip uninstall -y google-cloud-storage google-cloud-firestore google-cloud-core || true
-          pip uninstall -y grpcio googleapis-common-protos || true
 
-      - name: Install deps
-        run: |
+          # ✅ remove known troublemakers if they exist
+          python -m pip uninstall -y google google-cloud || true
+
+          # Install project deps
           pip install -r ingestor/requirements.txt
 
-      # ✅ quick sanity check before running your script
-      - name: Verify google-cloud-storage import
+          # ✅ force ensure storage is present
+          pip install -U google-cloud-storage google-cloud-core
+
+          # show installed google-cloud packages
+          python -m pip freeze | grep -E "google|grpc" || true
+
+      - name: Verify storage import (hard debug)
         run: |
-          python -c "import google; import google.cloud; from google.cloud import storage; print('OK:', storage.__file__)"
+          python - <<'PY'
+          import pkgutil, sys
+          print("Python:", sys.version)
+
+          import google
+          print("google module:", google)
+          print("google.__file__:", getattr(google, "__file__", None))
+          print("google.__path__:", list(getattr(google, "__path__", [])))
+
+          # list what's inside google.cloud
+          import google.cloud
+          print("google.cloud:", google.cloud)
+          print("google.cloud.__path__:", list(getattr(google.cloud, "__path__", [])))
+
+          print("Available under google.cloud:")
+          mods = sorted([m.name for m in pkgutil.iter_modules(google.cloud.__path__)])
+          print(mods[:50], "... total:", len(mods))
+
+          # the real test
+          from google.cloud import storage
+          print("✅ SUCCESS: google.cloud.storage imported:", storage)
+          PY
 
       - name: Create Google credentials file (from secret)
         shell: bash
