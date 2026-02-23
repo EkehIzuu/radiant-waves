@@ -29,7 +29,36 @@ jobs:
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
+
+          # ✅ Common fix: remove the bad "google" package if it exists
+          python -m pip uninstall -y google || true
+
+          # Install your deps
           pip install -r ingestor/requirements.txt
+
+          # ✅ Ensure storage lib exists (even if you forgot it in requirements.txt)
+          pip install -U google-cloud-storage google-cloud-core
+
+      - name: Debug google-cloud-storage import
+        run: |
+          python -m pip show google-cloud-storage || true
+          python -m pip show google || true
+          python -m pip show google-cloud-core || true
+
+          python - <<'PY'
+          import sys
+          print("python:", sys.version)
+
+          try:
+            from google.cloud import storage
+            print("✅ OK: imported google.cloud.storage")
+            print("storage module:", storage)
+          except Exception as e:
+            print("❌ IMPORT FAILED:", repr(e))
+            import google
+            print("google module path:", getattr(google, "__file__", "namespace/no file"))
+            raise
+          PY
 
       - name: Create Google credentials file (from secret)
         shell: bash
