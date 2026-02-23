@@ -8,17 +8,10 @@ import {
 
 /* =========================================================
    SNAPSHOT (Storage-first) + OFFLINE FALLBACK (localStorage)
-   - If you set window.RW_SNAPSHOT_LATEST and window.RW_SNAPSHOT_FEED_BASE
-     in index.html (or later we add to settings.js), Home/Feeds load FAST.
-   - If not set, it falls back to your current API /articles endpoints.
 ========================================================= */
 const SNAPSHOT_CFG = {
-  // Example (set these globally):
-  // window.RW_SNAPSHOT_LATEST = "https://storage.googleapis.com/<bucket>/snapshots/latest.json.gz"
-  // window.RW_SNAPSHOT_FEED_BASE = "https://storage.googleapis.com/<bucket>/snapshots/feeds/"
   latestUrl: (typeof window !== "undefined" && window.RW_SNAPSHOT_LATEST) ? String(window.RW_SNAPSHOT_LATEST) : "",
   feedBase: (typeof window !== "undefined" && window.RW_SNAPSHOT_FEED_BASE) ? String(window.RW_SNAPSHOT_FEED_BASE) : "",
-  // localStorage keys
   keyLatest: "rw_snapshot_latest_v1",
   keyFeedPrefix: "rw_snapshot_feed_v1_",
 };
@@ -26,53 +19,39 @@ const SNAPSHOT_CFG = {
 function snapshotUrlForFeed(feed) {
   if (!feed) return "";
   if (!SNAPSHOT_CFG.feedBase) return "";
-  // expects files like: <base>/<feed>.json.gz
   return `${SNAPSHOT_CFG.feedBase.replace(/\/+$/, "/")}${encodeURIComponent(feed)}.json.gz`;
 }
 
 async function fetchSnapshotGz(url) {
-  // supports .json.gz (Content-Encoding: gzip) and also plain json
   const u = new URL(url, location.href);
-  u.searchParams.set("_t", String(Date.now())); // avoid stale CDN during testing
+  u.searchParams.set("_t", String(Date.now()));
   const res = await fetch(u.toString(), { cache: "no-store" });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-  // Most browsers auto-decompress when server sets Content-Encoding: gzip.
-  // So res.json() usually just works.
   return res.json();
 }
 
 function saveSnapshotCache(key, payload) {
-  try {
-    localStorage.setItem(key, JSON.stringify(payload));
-  } catch {}
+  try { localStorage.setItem(key, JSON.stringify(payload)); } catch {}
 }
-
 function loadSnapshotCache(key) {
   try {
     const raw = localStorage.getItem(key);
     if (!raw) return null;
     const obj = JSON.parse(raw);
     return obj && typeof obj === "object" ? obj : null;
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
-
 function setStaleUI(on, meta = "") {
-  // lightweight: show in status (no blank screen)
   if (!els.status) return;
-  if (on) {
-    els.status.textContent = meta ? `Offline / stale • ${meta}` : "Offline / stale";
-  }
+  if (on) els.status.textContent = meta ? `Offline / stale • ${meta}` : "Offline / stale";
 }
 
 /* =======================
    INFINITE SCROLL CONFIG
 ======================= */
-const PAGE_SIZE = 12;         // how many to add per scroll
-const MAX_LIMIT = 150;        // backend browse cap
-let loadedLimit = PAGE_SIZE;  // current limit for infinite
+const PAGE_SIZE = 12;
+const MAX_LIMIT = 150;
+let loadedLimit = PAGE_SIZE;
 let infiniteObserver = null;
 let infiniteSentinel = null;
 let homeObserver = null;
@@ -90,11 +69,11 @@ const els = {
   results: document.getElementById("results"),
 };
 
-let currentFeed = "";      // "" = Home; else feed
-let currentView = "home";  // "home" | "match-center"
+let currentFeed = "";
+let currentView = "home"; // "home" | "match-center"
 const HOME_LIMIT = 80;
-const HOME_FEEDS = ["politics","football","celebrity"];
-let homeLoadedLimit = 24; // per-feed limit for home (infinite)
+const HOME_FEEDS = ["politics", "football", "celebrity"];
+let homeLoadedLimit = 24;
 const POLL_MS = Number.isFinite(REFRESH_INTERVAL_MS) ? REFRESH_INTERVAL_MS : 30 * 60 * 1000;
 
 const FEED_TITLES = {
@@ -139,45 +118,49 @@ function makePlaceholder(label = "News") {
     </svg>`;
   return "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg);
 }
-function makeSlug(s) {
-  return (s || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
-}
 
 /** GitHub Pages-safe base URL (keeps /radiant-waves/) */
 function baseSiteUrl() {
   return `${location.origin}${location.pathname}`;
 }
 
-/**
- * Internal article URL (SSR share page from backend)
- */
-function internalArticleUrl(a) {
-  if (a?.id) return `${API_BASE}/r/${encodeURIComponent(a.id)}`; // redirects to /read/<slug>?id=<id>
-  return a?.url || "#";
+/* =======================
+   ROUTER (HASH) — Article independent view
+   - List/Home stay normal
+   - Article view uses: #/article?u=<encoded>
+======================= */
+function parseHashRoute() {
+  const raw = (location.hash || "").replace(/^#/, "");
+  if (!raw) return { route: "", params: new URLSearchParams() };
+
+  // raw like "/article?u=..."
+  const qIndex = raw.indexOf("?");
+  const route = (qIndex >= 0 ? raw.slice(0, qIndex) : raw).replace(/^\/+/, "");
+  const qs = qIndex >= 0 ? raw.slice(qIndex + 1) : "";
+  return { route, params: new URLSearchParams(qs) };
 }
 
 function getArticleParams() {
-  const p = new URLSearchParams(location.search);
-  return {
-    key: p.get("article") || "",
-    srcUrl: p.get("u") || ""
-  };
+  const { route, params } = parseHashRoute();
+  if (route !== "article") return { srcUrl: "" };
+  return { srcUrl: params.get("u") || "" };
 }
 
-function navigateTo(url) {
-  history.pushState({}, "", url);
-  safeLoad();
+function openArticleHash(url) {
+  if (!url) return "#";
+  return `#/article?u=${encodeURIComponent(url)}`;
 }
 
 function clearArticleRoute() {
-  const p = new URLSearchParams(location.search);
-  p.delete("article");
-  p.delete("u");
-  const next = p.toString();
-  history.pushState({}, "", `${baseSiteUrl()}${next ? `?${next}` : ""}`);
+  // keep user at current page but remove article hash
+  if (location.hash && location.hash.startsWith("#/article")) {
+    history.pushState({}, "", `${baseSiteUrl()}${location.search || ""}#`);
+  }
+}
+
+function internalArticleUrl(a) {
+  // ✅ make every article “independent view”
+  return openArticleHash(a?.url || "");
 }
 
 /* =======================
@@ -196,15 +179,11 @@ async function fetchJSONRelaxed(u, fallback = []) {
 }
 
 /* =======================
-   IMAGE PIPE (faster lazy resolve)
+   IMAGE PIPE
 ======================= */
 function proxied(u) { return `${API_BASE}/img?url=${encodeURIComponent(u)}`; }
 
-/**
- * We DO NOT want to call /pick_image for 100 images at once.
- * We'll only resolve placeholders when they enter viewport.
- */
-const IMG_PICK_CACHE = new Map(); // articleUrl -> imageUrl
+const IMG_PICK_CACHE = new Map();
 let imgPickQueue = [];
 let imgPickActive = 0;
 const IMG_PICK_MAX = 4;
@@ -212,7 +191,6 @@ const IMG_PICK_MAX = 4;
 function enqueueImagePick(articleUrl, imgEl) {
   if (!articleUrl || !imgEl) return;
 
-  // already resolved?
   const cached = IMG_PICK_CACHE.get(articleUrl);
   if (cached) {
     imgEl.src = proxied(cached);
@@ -220,7 +198,6 @@ function enqueueImagePick(articleUrl, imgEl) {
     return;
   }
 
-  // avoid duplicate queue entries
   if (imgEl.dataset._pickQueued === "1") return;
   imgEl.dataset._pickQueued = "1";
 
@@ -234,8 +211,6 @@ async function pumpImagePickQueue() {
     if (!job) break;
 
     const { articleUrl, imgEl } = job;
-
-    // element removed?
     if (!document.body.contains(imgEl)) continue;
 
     imgPickActive++;
@@ -251,10 +226,7 @@ async function pumpImagePickQueue() {
         // ignore
       } finally {
         imgPickActive--;
-        // allow re-try later if still lazy
-        if (imgEl && imgEl.dataset && imgEl.dataset.lazy === "1") {
-          imgEl.dataset._pickQueued = "0";
-        }
+        if (imgEl && imgEl.dataset && imgEl.dataset.lazy === "1") imgEl.dataset._pickQueued = "0";
         pumpImagePickQueue();
       }
     })();
@@ -271,7 +243,7 @@ function setupLazyImageObserver() {
       const img = e.target;
       lazyImgObserver.unobserve(img);
 
-      const url = img?.dataset?.articleUrl || "";
+      const url = img?.dataset?.articleUrl || img?.dataset?.articleUrlLower || img?.dataset?.articleurl || img?.dataset?.articleUrl || "";
       if (url) enqueueImagePick(url, img);
     }
   }, { rootMargin: "600px 0px" });
@@ -284,23 +256,21 @@ function hydrateLazyImages(root) {
 }
 
 /* =======================
-   SHARE (FB/WA + Copy; IG/TikTok = copy + open)
+   SHARE (FIXED)
+   - uses Web Share API when available
+   - otherwise copies link + shows small status message
 ======================= */
-function sharePayloadFromDataset(btn) {
-  const url = btn?.dataset?.url || "";
-  const title = btn?.dataset?.title || "Radiant Waves";
-  return { url, title, text: title };
+function pageUrlForShare(articleUrl) {
+  // Share the WEBSITE URL (not API_BASE), so it works on WhatsApp etc.
+  // It will open directly into the article view.
+  return `${baseSiteUrl()}${location.search || ""}${openArticleHash(articleUrl)}`;
 }
 
-function shareUrls({ url, title }) {
-  const u = encodeURIComponent(url);
-  const t = encodeURIComponent(title);
-  return {
-    whatsapp: `https://wa.me/?text=${t}%20${u}`,
-    facebook: `https://www.facebook.com/sharer/sharer.php?u=${u}`,
-    instagram: `https://www.instagram.com/`,
-    tiktok: `https://www.tiktok.com/`,
-  };
+function sharePayloadFromDataset(btn) {
+  const title = btn?.dataset?.title || "Radiant Waves";
+  const articleUrl = btn?.dataset?.articleUrl || btn?.dataset?.url || "";
+  const shareUrl = btn?.dataset?.shareUrl || (articleUrl ? pageUrlForShare(articleUrl) : "");
+  return { title, text: title, url: shareUrl };
 }
 
 async function copyToClipboard(text) {
@@ -324,17 +294,39 @@ async function copyToClipboard(text) {
   }
 }
 
+function toast(msg) {
+  // minimal: reuse status bar so no extra CSS needed
+  if (!els.status) return;
+  const old = els.status.textContent;
+  els.status.textContent = msg;
+  setTimeout(() => {
+    if (els.status.textContent === msg) els.status.textContent = old || "";
+  }, 1600);
+}
+
 function closeAllShareMenus() {
   document.querySelectorAll(".rw-share-menu").forEach(m => m.remove());
+}
+
+function shareUrls({ url, title }) {
+  const u = encodeURIComponent(url);
+  const t = encodeURIComponent(title);
+  return {
+    whatsapp: `https://wa.me/?text=${t}%20${u}`,
+    facebook: `https://www.facebook.com/sharer/sharer.php?u=${u}`,
+    instagram: `https://www.instagram.com/`,
+    tiktok: `https://www.tiktok.com/`,
+  };
 }
 
 function openShareMenu(btn) {
   closeAllShareMenus();
 
-  const { url, title } = sharePayloadFromDataset(btn);
-  if (!url) return;
+  const payload = sharePayloadFromDataset(btn);
+  if (!payload.url) return;
 
-  const links = shareUrls({ url, title });
+  const links = shareUrls({ url: payload.url, title: payload.title });
+
   const menu = document.createElement("div");
   menu.className = "rw-share-menu";
   menu.innerHTML = `
@@ -358,10 +350,16 @@ function openShareMenu(btn) {
   menu.style.display = "grid";
   menu.style.gap = "6px";
 
-  const top = Math.min(window.innerHeight - 12, rect.bottom + 8);
-  const left = Math.min(window.innerWidth - 12, rect.left);
-  menu.style.top = `${Math.max(12, top)}px`;
-  menu.style.left = `${Math.max(12, left)}px`;
+  // keep inside viewport
+  const idealTop = rect.bottom + 8;
+  const idealLeft = rect.left;
+  const maxLeft = window.innerWidth - 12 - 180;
+  const left = Math.max(12, Math.min(idealLeft, maxLeft));
+  const maxTop = window.innerHeight - 12 - 260;
+  const top = Math.max(12, Math.min(idealTop, maxTop));
+
+  menu.style.top = `${top}px`;
+  menu.style.left = `${left}px`;
 
   menu.querySelectorAll(".rw-share-item").forEach(el => {
     el.style.display = "flex";
@@ -389,29 +387,33 @@ function openShareMenu(btn) {
 
     if (act === "native") {
       if (navigator.share) {
-        try { await navigator.share({ title, text: title, url }); } catch {}
+        try { await navigator.share(payload); } catch {}
       } else {
-        await copyToClipboard(url);
+        await copyToClipboard(payload.url);
+        toast("Link copied ✅");
       }
       closeAllShareMenus();
       return;
     }
 
     if (act === "copy") {
-      await copyToClipboard(url);
+      await copyToClipboard(payload.url);
+      toast("Link copied ✅");
       closeAllShareMenus();
       return;
     }
 
     if (act === "ig") {
-      await copyToClipboard(url);
+      await copyToClipboard(payload.url);
+      toast("Link copied ✅ (paste on IG)");
       window.open(links.instagram, "_blank", "noopener");
       closeAllShareMenus();
       return;
     }
 
     if (act === "tt") {
-      await copyToClipboard(url);
+      await copyToClipboard(payload.url);
+      toast("Link copied ✅ (paste on TikTok)");
       window.open(links.tiktok, "_blank", "noopener");
       closeAllShareMenus();
       return;
@@ -437,15 +439,14 @@ function openShareMenu(btn) {
 ======================= */
 function shareBtnHtml(a) {
   const title = escapeHtml(stripTags(a.title || "Radiant Waves"));
-  const url = escapeHtml(internalArticleUrl(a));
+  const articleUrl = escapeHtml(a.url || "");
+  // Use your CSS class .share-btn (and keep .rw-share-btn for compatibility)
   return `
-    <button class="rw-share-btn" type="button"
+    <button class="share-btn rw-share-btn" type="button"
       aria-label="Share"
       data-title="${title}"
-      data-url="${url}"
-      style="margin-left:auto;border:1px solid rgba(0,0,0,.08);background:#fff;border-radius:999px;
-             padding:8px 10px;cursor:pointer;font-weight:800;font-size:12px;">
-      Share
+      data-article-url="${articleUrl}">
+      <i class="fas fa-share"></i> Share
     </button>
   `;
 }
@@ -463,7 +464,7 @@ function cardHtml(a, { sectionLabel = "News" } = {}) {
     lazyAttr = ` data-lazy="1" data-article-url="${escapeHtml(a.url || "")}"`;
   }
 
-  const href = internalArticleUrl(a);
+  const href = internalArticleUrl(a); // ✅ hash route
 
   return `
     <li class="card">
@@ -471,13 +472,13 @@ function cardHtml(a, { sectionLabel = "News" } = {}) {
         <img class="thumb" src="${imgSrc}" alt="" loading="lazy" decoding="async"
              onerror="this.dataset.fallback='1'; this.src='${makePlaceholder(sectionLabel)}';"${lazyAttr}>
         <div class="headline-overlay">
-          <a class="title headline-title" href="${href}" rel="noopener">${escapeHtml(titleText)}</a>
+          <a class="title headline-title" href="${href}">${escapeHtml(titleText)}</a>
         </div>
       </div>
       <div class="content">
         <div class="meta" style="display:flex;align-items:center;gap:10px;">
           <span>${escapeHtml(a.source || "")} • ${fmtTime(a.publishedAt)}</span>
-          ${shareBtnHtml(a)}
+          <span style="margin-left:auto;display:inline-flex;">${shareBtnHtml(a)}</span>
         </div>
         <p class="summary">${escapeHtml(summaryText)}</p>
       </div>
@@ -516,25 +517,21 @@ function normalizeArticlePayload(raw, fallback = {}) {
   const author = raw?.author || "";
   const imageUrl = raw?.imageUrl || raw?.image || fallback?.imageUrl || "";
   const summary = stripTags(raw?.summary || raw?.description || fallback?.summary || "");
-
-  const contentText =
-    stripTags(raw?.content || raw?.body || raw?.text || raw?.article || raw?.html || "");
-
+  const contentText = stripTags(raw?.content || raw?.body || raw?.text || raw?.article || raw?.html || "");
   return { title, source, publishedAt, author, imageUrl, summary, contentText };
 }
 
-async function showArticleView(articleKey, sourceUrl = "") {
+async function showArticleView(sourceUrl = "") {
   stopInfiniteScroll();
   stopHomeInfinite();
   closeAllShareMenus();
 
   els.status.textContent = "Loading article…";
-
   els.results.innerHTML = "";
   els.results.style.display = "none";
   els.home.style.display = "";
 
-  const fallback = { title: articleKey, url: sourceUrl };
+  const fallback = { title: "Article", url: sourceUrl };
 
   const raw = await fetchArticleByUrl(sourceUrl);
   const a = normalizeArticlePayload(raw || {}, fallback);
@@ -550,6 +547,8 @@ async function showArticleView(articleKey, sourceUrl = "") {
   const heroSrc = heroImg && !isLogoish(heroImg) ? proxied(heroImg) : makePlaceholder("Article");
   const hasContent = Boolean((a.contentText || "").trim().length);
 
+  const shareUrl = pageUrlForShare(sourceUrl);
+
   els.home.innerHTML = `
     <section class="rw-article" style="max-width:980px;margin:16px auto;padding:0 12px;">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
@@ -558,11 +557,11 @@ async function showArticleView(articleKey, sourceUrl = "") {
           ← Back
         </button>
 
-        <button class="rw-share-btn" type="button"
+        <button class="share-btn rw-share-btn" type="button"
           data-title="${escapeHtml(a.title)}"
-          data-url="${escapeHtml(location.href)}"
-          style="margin-left:auto;border:1px solid rgba(0,0,0,.10);background:#fff;border-radius:999px;padding:8px 12px;cursor:pointer;font-weight:800;">
-          Share
+          data-share-url="${escapeHtml(shareUrl)}"
+          data-article-url="${escapeHtml(sourceUrl)}">
+          <i class="fas fa-share"></i> Share
         </button>
       </div>
 
@@ -609,6 +608,7 @@ async function showArticleView(articleKey, sourceUrl = "") {
   if (backBtn) {
     backBtn.addEventListener("click", () => {
       clearArticleRoute();
+      // restore to home
       currentView = "home";
       currentFeed = "";
       els.q.value = "";
@@ -616,7 +616,7 @@ async function showArticleView(articleKey, sourceUrl = "") {
         a.classList.remove("active");
         a.removeAttribute("aria-current");
       });
-      const homeLink = [...els.navLinks].find(x => (x.dataset.feed || "") === "");
+      const homeLink = [...els.navLinks].find(x => (x.dataset.feed || "") === "" && !x.dataset.view);
       if (homeLink) {
         homeLink.classList.add("active");
         homeLink.setAttribute("aria-current", "page");
@@ -629,7 +629,7 @@ async function showArticleView(articleKey, sourceUrl = "") {
 }
 
 /* =======================
-   HOME BLOCKS (breaking/top/latest/weather/broadcast)
+   HOME BLOCKS
 ======================= */
 function scoreBreaking(a) {
   const t = (a?.title || "").toLowerCase();
@@ -724,7 +724,7 @@ function weatherText(code) {
 }
 
 function mixByFeed(items, feeds) {
-  const order = (Array.isArray(feeds) && feeds.length) ? feeds : ["politics","football","celebrity"];
+  const order = (Array.isArray(feeds) && feeds.length) ? feeds : ["politics", "football", "celebrity"];
   const buckets = {}; order.forEach(f => buckets[f] = []);
   const rest = [];
   for (const a of (items || [])) {
@@ -751,15 +751,11 @@ function mixByFeed(items, feeds) {
   return final;
 }
 
-/* =========================================================
-   STORAGE SNAPSHOT LOADERS
-   - Home: latest.json.gz (one fast hit)
-   - Feed: feeds/<feed>.json.gz (one fast hit)
-   - If snapshot fails -> localStorage -> offline/stale UI
-========================================================= */
-async function loadHomeSnapshot(perLimit) {
+/* =======================
+   SNAPSHOT LOADERS
+======================= */
+async function loadHomeSnapshot() {
   if (!SNAPSHOT_CFG.latestUrl) return null;
-
   try {
     const payload = await fetchSnapshotGz(SNAPSHOT_CFG.latestUrl);
     if (payload && Array.isArray(payload.items)) {
@@ -790,11 +786,9 @@ async function loadHome() {
 
   const per = Math.max(6, Math.min(homeLoadedLimit, HOME_LIMIT));
 
-  // 1) FAST PATH: snapshot latest
-  let snapshot = await loadHomeSnapshot(per);
+  let snapshot = await loadHomeSnapshot();
   let usedStale = false;
 
-  // 2) Fallback: localStorage snapshot
   if (!snapshot) {
     const cached = loadSnapshotCache(SNAPSHOT_CFG.keyLatest);
     if (cached && Array.isArray(cached.items) && cached.items.length) {
@@ -803,14 +797,12 @@ async function loadHome() {
     }
   }
 
-  // 3) If still nothing: old API method (your current way)
   let all = [];
   if (snapshot && Array.isArray(snapshot.items)) {
-    all = snapshot.items.slice(0, Math.max(20, per * 3)); // enough pool to mix
+    all = snapshot.items.slice(0, Math.max(20, per * 3));
     if (usedStale) setStaleUI(true, "showing last saved snapshot");
     else setStaleUI(false);
   } else {
-    // If snapshots not configured, or failed completely, use API calls
     const lists = await Promise.all(
       HOME_FEEDS.map(feed => fetchJSONRelaxed(`${API_BASE}/articles?feed=${feed}&limit=${per}`, []))
     );
@@ -818,7 +810,7 @@ async function loadHome() {
     setStaleUI(!navigator.onLine, "live fetch failed");
   }
 
-  all.sort((a,b) => new Date(b.publishedAt||b.ingestedAt||0) - new Date(a.publishedAt||a.ingestedAt||0));
+  all.sort((a, b) => new Date(b.publishedAt || b.ingestedAt || 0) - new Date(a.publishedAt || a.ingestedAt || 0));
   const mixed = mixByFeed(all, HOME_FEEDS);
   els.status.textContent = "";
 
@@ -848,7 +840,7 @@ async function loadHome() {
   const breakingHtml = breaking ? `
     <div class="breaking-news">
       <h3><i class="fas fa-exclamation-circle"></i> BREAKING</h3>
-      <a href="${internalArticleUrl(breaking)}" rel="noopener">${escapeHtml(stripTags(breaking.title))}</a>
+      <a href="${internalArticleUrl(breaking)}">${escapeHtml(stripTags(breaking.title))}</a>
       <p>${escapeHtml(stripTags(breaking.summary || "").slice(0, 140))}</p>
       <div style="margin-top:10px;display:flex;gap:10px;align-items:center;">
         ${shareBtnHtml(breaking)}
@@ -884,14 +876,14 @@ async function loadHome() {
         const feed = escapeHtml((a.feed || "").toUpperCase() || "TOP");
         return `
           <article class="news-card">
-            <a href="${internalArticleUrl(a)}" rel="noopener" aria-label="${escapeHtml(title)}">
+            <a href="${internalArticleUrl(a)}" aria-label="${escapeHtml(title)}">
               <img src="${img}" alt="" loading="lazy" decoding="async"
                    ${(!a.imageUrl || isLogoish(a.imageUrl)) ? `data-lazy="1" data-article-url="${escapeHtml(a.url || "")}"` : ""}>
             </a>
             <div class="news-card-content">
               <div class="news-category">${feed}</div>
               <h3>
-                <a href="${internalArticleUrl(a)}" rel="noopener" style="text-decoration:none;color:inherit;">
+                <a href="${internalArticleUrl(a)}" style="text-decoration:none;color:inherit;">
                   ${escapeHtml(title)}
                 </a>
               </h3>
@@ -914,7 +906,7 @@ async function loadHome() {
         return `
           <li style="display:flex;gap:10px;align-items:flex-start;justify-content:space-between;">
             <div style="min-width:0;">
-              <a href="${internalArticleUrl(a)}" rel="noopener" style="font-weight:800;color:#111;text-decoration:none;">
+              <a href="${internalArticleUrl(a)}" style="font-weight:800;color:#111;text-decoration:none;">
                 ${escapeHtml(title)}
               </a>
               <div class="small" style="margin-top:4px;color:#666;font-size:13px;">
@@ -950,11 +942,11 @@ async function loadHome() {
                 <div class="broadcast-stats">
                   <span><i class="fas fa-signal"></i> ${yt ? "Online" : "Offline"}</span>
                   <span>
-                    <button class="rw-share-btn" type="button"
+                    <button class="share-btn rw-share-btn" type="button"
                       data-title="Radiant Waves Live"
-                      data-url="${escapeHtml(location.href)}"
-                      style="border:1px solid rgba(0,0,0,.08);background:#fff;border-radius:999px;padding:8px 10px;cursor:pointer;font-weight:800;font-size:12px;">
-                      Share
+                      data-share-url="${escapeHtml(baseSiteUrl())}"
+                      data-article-url="">
+                      <i class="fas fa-share"></i> Share
                     </button>
                   </span>
                 </div>
@@ -1011,13 +1003,12 @@ async function loadHome() {
 }
 
 /* =======================
-   INFINITE SCROLL (Feed/Search only)
+   INFINITE SCROLL
 ======================= */
 function stopHomeInfinite() {
   if (homeObserver) { homeObserver.disconnect(); homeObserver = null; }
   if (homeSentinel) { homeSentinel.remove(); homeSentinel = null; }
 }
-
 function setupHomeInfinite() {
   stopHomeInfinite();
   if (els.home.style.display === "none") return;
@@ -1045,16 +1036,9 @@ function setupHomeInfinite() {
 }
 
 function stopInfiniteScroll() {
-  if (infiniteObserver) {
-    infiniteObserver.disconnect();
-    infiniteObserver = null;
-  }
-  if (infiniteSentinel) {
-    infiniteSentinel.remove();
-    infiniteSentinel = null;
-  }
+  if (infiniteObserver) { infiniteObserver.disconnect(); infiniteObserver = null; }
+  if (infiniteSentinel) { infiniteSentinel.remove(); infiniteSentinel = null; }
 }
-
 function setupInfiniteScroll(currentCount) {
   stopInfiniteScroll();
   if (els.results.style.display === "none") return;
@@ -1069,12 +1053,10 @@ function setupInfiniteScroll(currentCount) {
 
   infiniteObserver = new IntersectionObserver(async (entries) => {
     if (!entries.some(e => e.isIntersecting)) return;
-
     const next = Math.min(loadedLimit + PAGE_SIZE, MAX_LIMIT);
     if (next === loadedLimit) return;
 
     loadedLimit = next;
-
     if (inflight) return;
     await loadFeed({ append: true });
   }, { rootMargin: "900px 0px" });
@@ -1091,14 +1073,11 @@ async function loadFeed({ append = false } = {}) {
   const q = els.q.value.trim();
   if (!append) loadedLimit = PAGE_SIZE;
 
-  // SEARCH must hit backend (reliability)
   const isSearch = Boolean(q);
-
   if (!append) els.status.textContent = "Loading…";
 
   let items = [];
 
-  // 1) If not searching and we have snapshots: load feed snapshot
   if (!isSearch && currentFeed) {
     let snap = await loadFeedSnapshot(currentFeed);
     let usedStale = false;
@@ -1118,7 +1097,6 @@ async function loadFeed({ append = false } = {}) {
     }
   }
 
-  // 2) Fallback: current API method (and always for search)
   if (!items.length) {
     const url = new URL(`${API_BASE}/articles`);
     if (q) url.searchParams.set("q", q);
@@ -1134,32 +1112,25 @@ async function loadFeed({ append = false } = {}) {
   els.home.innerHTML = "";
   els.home.style.display = "none";
 
-  // NOTE: when append=true, we should append new cards instead of overwrite
   const html = items.map(a => cardHtml(a, { sectionLabel: label })).join("");
 
-  if (append && els.results.innerHTML) {
-    els.results.innerHTML = html; // snapshot/API already returns full list up to limit
-  } else {
-    els.results.innerHTML = html;
-  }
-
+  // API/Snapshot returns full list up to limit, so overwrite is ok
+  els.results.innerHTML = html;
   els.results.style.display = "";
 
   if (!items.length) {
     renderEmptyState(els.results, "Nothing to show yet.");
-    // extra clarity: don’t leave blank
     if (!navigator.onLine) setStaleUI(true, "no cached data");
   }
 
   hydrateLazyImages(els.results);
-
   els.status.textContent = q ? `${items.length} result(s)` : `${items.length} latest`;
-
   setupInfiniteScroll(items.length);
 }
 
 /* =======================
-   MATCH CENTER (unchanged)
+   MATCH CENTER (UNCHANGED from your file)
+   (kept as-is)
 ======================= */
 async function showMatchCenterShell() {
   stopInfiniteScroll();
@@ -1573,9 +1544,9 @@ async function safeLoad() {
   try {
     closeAllShareMenus();
 
-    const { key, srcUrl } = getArticleParams();
-    if (key) {
-      await showArticleView(key, srcUrl);
+    const { srcUrl } = getArticleParams();
+    if (srcUrl) {
+      await showArticleView(srcUrl);
       markUpdated();
       return;
     }
@@ -1584,11 +1555,8 @@ async function safeLoad() {
       await showMatchCenterShell();
     } else {
       const q = els.q.value.trim();
-      if (!q && !currentFeed) {
-        await loadHome();
-      } else {
-        await loadFeed({ append: false });
-      }
+      if (!q && !currentFeed) await loadHome();
+      else await loadFeed({ append: false });
     }
 
     markUpdated();
@@ -1635,16 +1603,22 @@ els.form?.addEventListener("submit", (e) => {
   safeLoad();
 });
 
-// Share button handler
-document.addEventListener("click", (e) => {
-  const btn = e.target.closest(".rw-share-btn");
+// Share button handler (supports .share-btn + .rw-share-btn)
+document.addEventListener("click", async (e) => {
+  const btn = e.target.closest(".rw-share-btn, .share-btn");
   if (!btn) return;
+
+  // if menu is open and user clicks share again, toggle it
   e.preventDefault();
+
+  // quick native share on mobile if no long-press menu needed:
+  // BUT we keep your menu too — open menu always; inside has "Share…"
   openShareMenu(btn);
 });
 
-// ✅ Handle browser back/forward
+// ✅ Handle browser back/forward + hash changes
 window.addEventListener("popstate", () => safeLoad());
+window.addEventListener("hashchange", () => safeLoad());
 
 /* =======================
    BOOT + REFRESH
@@ -1665,7 +1639,7 @@ const closeBtn = document.getElementById("drawerClose");
 
 let lastFocusEl = null;
 
-function openDrawer(){
+function openDrawer() {
   if (!drawer || !backdrop || !menuBtn) return;
   lastFocusEl = document.activeElement;
 
@@ -1679,7 +1653,7 @@ function openDrawer(){
   firstLink?.focus();
 }
 
-function closeDrawer(){
+function closeDrawer() {
   if (!drawer || !backdrop || !menuBtn) return;
 
   drawer.classList.remove("open");
