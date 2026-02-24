@@ -125,6 +125,29 @@ function baseSiteUrl() {
 }
 
 /* =======================
+   METRICS (Trending)
+======================= */
+const RW_METRIC_COOLDOWN_MS = 45 * 60 * 1000; // 45 mins per device per article per event
+
+function rwMetric(type, articleUrl) {
+  try {
+    if (!type || !articleUrl) return;
+
+    // simple per-device cooldown
+    const key = `rw_m_${type}_${articleUrl}`;
+    const last = Number(localStorage.getItem(key) || "0");
+    if (Date.now() - last < RW_METRIC_COOLDOWN_MS) return;
+    localStorage.setItem(key, String(Date.now()));
+
+    fetch(`${API_BASE}/metrics/event`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type, articleUrl, ts: Date.now() })
+    }).catch(() => {});
+  } catch {}
+}
+
+/* =======================
    ROUTER (HASH) — Article independent view
    - List/Home stay normal
    - Article view uses: #/article?u=<encoded>
@@ -392,6 +415,11 @@ function openShareMenu(btn) {
         await copyToClipboard(payload.url);
         toast("Link copied ✅");
       }
+
+      // ✅ metrics: share
+      const aUrl = btn?.dataset?.articleUrl || "";
+      if (aUrl) rwMetric("share", aUrl);
+
       closeAllShareMenus();
       return;
     }
@@ -399,6 +427,11 @@ function openShareMenu(btn) {
     if (act === "copy") {
       await copyToClipboard(payload.url);
       toast("Link copied ✅");
+
+      // ✅ metrics: share
+      const aUrl = btn?.dataset?.articleUrl || "";
+      if (aUrl) rwMetric("share", aUrl);
+
       closeAllShareMenus();
       return;
     }
@@ -407,6 +440,11 @@ function openShareMenu(btn) {
       await copyToClipboard(payload.url);
       toast("Link copied ✅ (paste on IG)");
       window.open(links.instagram, "_blank", "noopener");
+
+      // ✅ metrics: share
+      const aUrl = btn?.dataset?.articleUrl || "";
+      if (aUrl) rwMetric("share", aUrl);
+
       closeAllShareMenus();
       return;
     }
@@ -415,6 +453,11 @@ function openShareMenu(btn) {
       await copyToClipboard(payload.url);
       toast("Link copied ✅ (paste on TikTok)");
       window.open(links.tiktok, "_blank", "noopener");
+
+      // ✅ metrics: share
+      const aUrl = btn?.dataset?.articleUrl || "";
+      if (aUrl) rwMetric("share", aUrl);
+
       closeAllShareMenus();
       return;
     }
@@ -525,6 +568,9 @@ async function showArticleView(sourceUrl = "") {
   stopInfiniteScroll();
   stopHomeInfinite();
   closeAllShareMenus();
+
+  // ✅ metrics: count a view (cooldown handled client-side)
+  if (sourceUrl) rwMetric("view", sourceUrl);
 
   els.status.textContent = "Loading article…";
   els.results.innerHTML = "";
@@ -1602,6 +1648,20 @@ els.form?.addEventListener("submit", (e) => {
   stopHomeInfinite();
   safeLoad();
 });
+
+// ✅ Track article card clicks (any link to #/article?u=...)
+document.addEventListener("click", (e) => {
+  const link = e.target.closest('a[href^="#/article?u="]');
+  if (!link) return;
+
+  try {
+    const href = link.getAttribute("href") || "";
+    const qs = href.split("?")[1] || "";
+    const u = new URLSearchParams(qs).get("u") || "";
+    const src = u ? decodeURIComponent(u) : "";
+    if (src) rwMetric("click", src);
+  } catch {}
+}, { capture: true });
 
 // Share button handler (supports .share-btn + .rw-share-btn)
 document.addEventListener("click", async (e) => {
