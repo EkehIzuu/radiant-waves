@@ -10,7 +10,7 @@ import time
 import gzip
 import hashlib
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse, urljoin
 
 import requests
@@ -18,6 +18,7 @@ import feedparser  # ← for football RSS
 from flask import Flask, jsonify, request, Response, redirect, render_template, url_for, abort
 from flask_cors import CORS
 from google.cloud import firestore
+from google.cloud.firestore import Increment
 from google.oauth2 import service_account
 from google.api_core.exceptions import ResourceExhausted
 
@@ -43,12 +44,12 @@ _MEM_TTL = int(os.getenv("MEM_TTL_SECONDS", "90"))  # general /articles TTL
 _PICK_TTL = int(os.getenv("PICK_CACHE_SECONDS", "86400"))  # pick_image TTL
 
 # ✅ SNAPSHOT URLs (public GCS/Firebase Storage URLs)
-# Example:
-#   SNAPSHOT_LATEST_URL=https://storage.googleapis.com/<bucket>/snapshots/latest.json.gz
-#   SNAPSHOT_FEED_BASE=https://storage.googleapis.com/<bucket>/snapshots/feeds/
 SNAPSHOT_LATEST_URL = (os.getenv("SNAPSHOT_LATEST_URL") or "").strip()
 SNAPSHOT_FEED_BASE = (os.getenv("SNAPSHOT_FEED_BASE") or "").strip().rstrip("/") + "/" if os.getenv("SNAPSHOT_FEED_BASE") else ""
 SNAPSHOT_TTL = int(os.getenv("SNAPSHOT_TTL_SECONDS", "90"))  # how often backend refetches snapshot
+
+# ✅ Trending job protection
+CRON_TOKEN = (os.getenv("CRON_TOKEN") or "").strip()
 
 # ------------------------------------------
 
@@ -97,6 +98,16 @@ def doc_to_public(d):
 
 def _sha1(s: str) -> str:
     return hashlib.sha1(s.encode("utf-8")).hexdigest()
+
+def _utc_day_id(dt=None) -> str:
+    dt = dt or datetime.now(timezone.utc)
+    return dt.strftime("%Y%m%d")
+
+def _now_utc():
+    return datetime.now(timezone.utc)
+
+def _clamp(n, lo, hi):
+    return max(lo, min(hi, n))
 
 # ---------- Ensure imageUrl/image_url for outbound articles ----------
 def ensure_image_fields(d: dict) -> dict:
@@ -171,10 +182,12 @@ def _get_doc_by_slug(slug: str):
 def add_cors(resp):
     resp.headers["Access-Control-Allow-Origin"] = "*"
     resp.headers["Access-Control-Allow-Methods"] = "GET, HEAD, OPTIONS, POST"
-    resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    resp.headers["Access-Control-Allow-Headers"] = "Content-Type, X-CRON-TOKEN"
 
     # Allow short caching for lists (frontend already cache-busts with _t)
     if request.path.startswith("/articles") or request.path.startswith("/search_articles"):
+        resp.headers["Cache-Control"] = "public, max-age=30"
+    elif request.path.startswith("/trending"):
         resp.headers["Cache-Control"] = "public, max-age=30"
     elif request.path.startswith("/img"):
         resp.headers["Cache-Control"] = "public, max-age=86400"
@@ -199,6 +212,9 @@ def root():
             "/livescore",
             "/img",
             "/pick_image",
+            "/metrics/event",
+            "/trending",
+            "/tasks/recompute_trending",
             "/diag",
             "/health",
             "/latest",
@@ -243,15 +259,12 @@ def _fetch_snapshot_payload(url: str) -> dict | None:
         if r.status_code >= 400:
             return None
 
-        # requests usually auto-decompress when Content-Encoding: gzip,
-        # but if it's a .json.gz served as bytes, this covers it.
         raw = r.content
         raw2 = _maybe_gunzip_bytes(raw)
 
         try:
             data = json.loads(raw2.decode("utf-8"))
         except Exception:
-            # fallback: maybe requests already decoded and r.text is JSON
             try:
                 data = r.json()
             except Exception:
@@ -348,7 +361,7 @@ def list_articles():
         resp.headers["X-Source"] = "disk"
         return resp
 
-    # 1) Memory cache (works for feed too now)
+    # 1) Memory cache
     mem = _mem_get_articles(feed, q)
     if mem is not None:
         resp = jsonify(mem[:limit])
@@ -366,13 +379,10 @@ def list_articles():
         if snap_payload and isinstance(snap_payload.get("items"), list) and snap_payload["items"]:
             items = snap_payload["items"]
 
-            # Snapshot items are already public json
-            # Ensure newest-first (use ingestedAt/publishedAt)
             def _k(d):
                 return _parse_ts_maybe(d.get("ingestedAt") or d.get("publishedAt"))
             items.sort(key=_k, reverse=True)
 
-            # Write memory cache
             _mem_set_articles(feed, q, items)
 
             resp = jsonify(items[:limit])
@@ -415,13 +425,11 @@ def list_articles():
             or q in tl(d.get("summary"))
         ]
 
-    # sort newest-first
     docs.sort(key=lambda d: _parse_ts_maybe(d.get("ingestedAt") or d.get("publishedAt")), reverse=True)
 
     if not from_cache:
         docs = [doc_to_public(d) for d in docs]
 
-    # write memory cache for next hit
     _mem_set_articles(feed, q, docs)
 
     resp = jsonify(docs[:limit])
@@ -473,6 +481,161 @@ def search_articles():
         results = [doc_to_public(d) for d in results]
 
     return jsonify(results[:limit])
+
+# =========================================================
+# METRICS + TRENDING (Upgrade 2)
+# =========================================================
+@app.route("/metrics/event", methods=["POST", "OPTIONS"])
+def metrics_event():
+    if request.method == "OPTIONS":
+        return ("", 204)
+
+    try:
+        payload = request.get_json(force=True, silent=True) or {}
+        typ = (payload.get("type") or "").strip().lower()
+        article_url = (payload.get("articleUrl") or "").strip()
+
+        if typ not in ("view", "click", "share"):
+            return jsonify({"ok": False, "error": "bad_type"}), 400
+        if not article_url.startswith(("http://", "https://")):
+            return jsonify({"ok": False, "error": "bad_url"}), 400
+
+        day_id = _utc_day_id()
+        k = _sha1(article_url)
+        docref = db.collection("metrics_24h").document(day_id)
+
+        inc_field = {"view": "v", "click": "c", "share": "s"}[typ]
+
+        # ensure doc exists
+        docref.set({"createdAt": firestore.SERVER_TIMESTAMP}, merge=True)
+
+        updates = {
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+            f"counters.{k}.url": article_url,
+            f"counters.{k}.last": firestore.SERVER_TIMESTAMP,
+            f"counters.{k}.{inc_field}": Increment(1),
+        }
+        docref.update(updates)
+
+        return jsonify({"ok": True}), 200
+
+    except Exception as e:
+        log.warning("metrics_event failed: %s", e)
+        return jsonify({"ok": False}), 500
+
+@app.get("/trending")
+def trending():
+    try:
+        limit = int(request.args.get("limit", "12"))
+        limit = _clamp(limit, 1, 50)
+
+        snap = db.collection("trending").document("global_24h").get()
+        if not snap.exists:
+            return jsonify({"ok": True, "items": [], "generatedAt": None}), 200
+
+        d = snap.to_dict() or {}
+        items = d.get("items") or []
+        gen = d.get("generatedAt")
+        return jsonify({
+            "ok": True,
+            "generatedAt": (gen.isoformat() if hasattr(gen, "isoformat") else None),
+            "items": items[:limit],
+        }), 200
+    except Exception as e:
+        log.warning("trending get failed: %s", e)
+        return jsonify({"ok": False}), 500
+
+@app.post("/tasks/recompute_trending")
+def recompute_trending():
+    # protect with secret header token
+    token = request.headers.get("X-CRON-TOKEN", "")
+    if not CRON_TOKEN or token != CRON_TOKEN:
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+
+    try:
+        now = _now_utc()
+        today = _utc_day_id(now)
+        yesterday = _utc_day_id(now - timedelta(days=1))
+
+        # read today + yesterday (covers last 24h window)
+        day_docs = []
+        for day_id in (today, yesterday):
+            s = db.collection("metrics_24h").document(day_id).get()
+            if s.exists:
+                day_docs.append(s.to_dict() or {})
+
+        # aggregate counters
+        agg = {}  # sha1 -> {url,v,c,s}
+        for d in day_docs:
+            counters = d.get("counters") or {}
+            for k, v in counters.items():
+                if not isinstance(v, dict):
+                    continue
+                url = (v.get("url") or "").strip()
+                if not url:
+                    continue
+                cur = agg.setdefault(k, {"url": url, "v": 0, "c": 0, "s": 0})
+                cur["v"] += int(v.get("v") or 0)
+                cur["c"] += int(v.get("c") or 0)
+                cur["s"] += int(v.get("s") or 0)
+
+        if not agg:
+            db.collection("trending").document("global_24h").set({
+                "generatedAt": firestore.SERVER_TIMESTAMP,
+                "items": []
+            }, merge=True)
+            return jsonify({"ok": True, "items": 0}), 200
+
+        # pull recent articles window (keep it cheap)
+        recent = []
+        qref = coll.order_by("ingestedAt", direction=firestore.Query.DESCENDING).limit(600)
+        for _doc in qref.stream(retry=None, timeout=15):
+            a = _doc.to_dict() or {}
+            a["id"] = _doc.id
+            if a.get("url"):
+                recent.append(a)
+
+        by_url = {a["url"]: a for a in recent}
+
+        def _score(article: dict, m: dict) -> float:
+            ts = _parse_ts_maybe(article.get("publishedAt") or article.get("ingestedAt"))
+            age_mins = max(0.0, (now - ts).total_seconds() / 60.0)
+            rec = max(0.0, 1440.0 - age_mins) / 1440.0  # 1.0 fresh -> 0.0 old
+
+            v = m["v"]; c = m["c"]; s = m["s"]
+            base = (v * 1.0) + (c * 3.0) + (s * 8.0)
+            return base * (0.35 + 0.65 * rec)
+
+        items = []
+        for _, m in agg.items():
+            a = by_url.get(m["url"])
+            if not a:
+                continue
+            sc = _score(a, m)
+            items.append({
+                "url": a.get("url"),
+                "title": a.get("title"),
+                "feed": a.get("feed"),
+                "publishedAt": doc_to_public({"publishedAt": a.get("publishedAt")}).get("publishedAt"),
+                "imageUrl": a.get("imageUrl") or a.get("image"),
+                "source": a.get("source"),
+                "score": round(float(sc), 4),
+                "v": int(m["v"]), "c": int(m["c"]), "s": int(m["s"]),
+            })
+
+        items.sort(key=lambda x: x["score"], reverse=True)
+        items = items[:60]
+
+        db.collection("trending").document("global_24h").set({
+            "generatedAt": firestore.SERVER_TIMESTAMP,
+            "items": items
+        }, merge=True)
+
+        return jsonify({"ok": True, "items": len(items)}), 200
+
+    except Exception as e:
+        log.exception("recompute_trending failed")
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 # ----------------- Image proxy (streamed, memory-safe) -----------------
 @app.route("/img", methods=["GET"])
