@@ -1,4 +1,4 @@
-# api.py
+# api.py (UPDATED — No snapshots required + AI rewrite worker + fixed ingest scheduler)
 import os
 # Silence noisy gRPC logs before importing Google libs
 os.environ.setdefault("GRPC_VERBOSITY", "ERROR")
@@ -31,7 +31,7 @@ FALLBACK_USER_AGENT = (
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
 
-PICKER_VERSION = "v5-snapshots"   # bump marker
+PICKER_VERSION = "v6-nosnap-ai"  # bump marker
 
 # Disk cache (fallback if Firestore quota fails)
 CACHE_PATH = os.path.join(os.path.dirname(__file__), "cache_articles.json")
@@ -43,13 +43,14 @@ RUN_JOBS = os.getenv("RUN_JOBS", "0") == "1"
 _MEM_TTL = int(os.getenv("MEM_TTL_SECONDS", "90"))  # general /articles TTL
 _PICK_TTL = int(os.getenv("PICK_CACHE_SECONDS", "86400"))  # pick_image TTL
 
-# ✅ SNAPSHOT URLs (public GCS/Firebase Storage URLs)
-SNAPSHOT_LATEST_URL = (os.getenv("SNAPSHOT_LATEST_URL") or "").strip()
-SNAPSHOT_FEED_BASE = (os.getenv("SNAPSHOT_FEED_BASE") or "").strip().rstrip("/") + "/" if os.getenv("SNAPSHOT_FEED_BASE") else ""
-SNAPSHOT_TTL = int(os.getenv("SNAPSHOT_TTL_SECONDS", "90"))  # how often backend refetches snapshot
-
 # ✅ Trending job protection
 CRON_TOKEN = (os.getenv("CRON_TOKEN") or "").strip()
+
+# ✅ AI worker protection + config
+AI_TASK_TOKEN = (os.getenv("AI_TASK_TOKEN") or "").strip()   # protect /tasks/ai_* endpoints
+AI_ENABLED = (os.getenv("AI_ENABLED", "0") == "1")          # 1 to enable real rewriting
+AI_MODEL = (os.getenv("AI_MODEL") or "gpt-4.1-mini").strip()
+OPENAI_API_KEY = (os.getenv("OPENAI_API_KEY") or "").strip()
 
 # ------------------------------------------
 
@@ -108,6 +109,10 @@ def _now_utc():
 
 def _clamp(n, lo, hi):
     return max(lo, min(hi, n))
+
+def _require_token(header_name: str, expected: str):
+    got = request.headers.get(header_name, "")
+    return bool(expected) and got == expected
 
 # ---------- Ensure imageUrl/image_url for outbound articles ----------
 def ensure_image_fields(d: dict) -> dict:
@@ -182,9 +187,8 @@ def _get_doc_by_slug(slug: str):
 def add_cors(resp):
     resp.headers["Access-Control-Allow-Origin"] = "*"
     resp.headers["Access-Control-Allow-Methods"] = "GET, HEAD, OPTIONS, POST"
-    resp.headers["Access-Control-Allow-Headers"] = "Content-Type, X-CRON-TOKEN"
+    resp.headers["Access-Control-Allow-Headers"] = "Content-Type, X-CRON-TOKEN, X-AI-TOKEN"
 
-    # Allow short caching for lists (frontend already cache-busts with _t)
     if request.path.startswith("/articles") or request.path.startswith("/search_articles"):
         resp.headers["Cache-Control"] = "public, max-age=30"
     elif request.path.startswith("/trending"):
@@ -201,10 +205,8 @@ def root():
     return jsonify({
         "ok": True,
         "service": "radiant-waves",
-        "snapshots": {
-            "latest": bool(SNAPSHOT_LATEST_URL),
-            "feedBase": bool(SNAPSHOT_FEED_BASE),
-        },
+        "snapshots": {"enabled": False},
+        "ai": {"enabled": AI_ENABLED, "model": AI_MODEL if AI_ENABLED else None},
         "endpoints": [
             "/articles",
             "/search_articles",
@@ -215,6 +217,8 @@ def root():
             "/metrics/event",
             "/trending",
             "/tasks/recompute_trending",
+            "/tasks/ai_rewrite_headlines",
+            "/ai/status",
             "/diag",
             "/health",
             "/latest",
@@ -225,89 +229,8 @@ def root():
     })
 
 # =========================================================
-# SNAPSHOT FETCH (public GCS URLs) + TTL memory cache
+# In-memory TTL cache for /articles results
 # =========================================================
-_SNAP_MEM = {
-    "latest": {"ts": 0.0, "payload": None},
-    "feeds": {},  # feed -> {ts, payload}
-}
-
-def _snapshot_url_for_feed(feed: str) -> str:
-    if not feed or not SNAPSHOT_FEED_BASE:
-        return ""
-    return f"{SNAPSHOT_FEED_BASE}{feed}.json.gz"
-
-def _maybe_gunzip_bytes(b: bytes) -> bytes:
-    # If payload is already JSON, return as-is; otherwise try gzip
-    if not b:
-        return b
-    # gzip magic number
-    if len(b) >= 2 and b[0] == 0x1F and b[1] == 0x8B:
-        try:
-            return gzip.decompress(b)
-        except Exception:
-            return b
-    return b
-
-def _fetch_snapshot_payload(url: str) -> dict | None:
-    if not url:
-        return None
-    try:
-        # Add cache-buster to avoid stale edge caches during testing
-        u = url + ("&" if "?" in url else "?") + "_t=" + str(int(time.time()))
-        r = requests.get(u, timeout=10, headers={"User-Agent": FALLBACK_USER_AGENT, "Accept": "application/json,*/*"})
-        if r.status_code >= 400:
-            return None
-
-        raw = r.content
-        raw2 = _maybe_gunzip_bytes(raw)
-
-        try:
-            data = json.loads(raw2.decode("utf-8"))
-        except Exception:
-            try:
-                data = r.json()
-            except Exception:
-                return None
-
-        if not isinstance(data, dict) or "items" not in data or not isinstance(data.get("items"), list):
-            return None
-        return data
-    except Exception:
-        return None
-
-def _get_snapshot_latest() -> dict | None:
-    if not SNAPSHOT_LATEST_URL:
-        return None
-    now = time.time()
-    cached = _SNAP_MEM["latest"]
-    if cached["payload"] is not None and (now - cached["ts"] <= SNAPSHOT_TTL):
-        return cached["payload"]
-    data = _fetch_snapshot_payload(SNAPSHOT_LATEST_URL)
-    if data:
-        cached["payload"] = data
-        cached["ts"] = now
-    return cached["payload"]
-
-def _get_snapshot_feed(feed: str) -> dict | None:
-    if not feed:
-        return None
-    url = _snapshot_url_for_feed(feed)
-    if not url:
-        return None
-
-    bucket = _SNAP_MEM["feeds"].setdefault(feed, {"ts": 0.0, "payload": None})
-    now = time.time()
-    if bucket["payload"] is not None and (now - bucket["ts"] <= SNAPSHOT_TTL):
-        return bucket["payload"]
-
-    data = _fetch_snapshot_payload(url)
-    if data:
-        bucket["payload"] = data
-        bucket["ts"] = now
-    return bucket["payload"]
-
-# ----------------- Tiny in-memory TTL cache for /articles results -----------------
 _MEM = {}  # key -> {ts, payload}
 
 def _mem_key(feed: str | None, q: str | None) -> str:
@@ -329,7 +252,7 @@ def _mem_set_articles(feed: str | None, q: str | None, payload):
     _MEM[k] = {"ts": time.time(), "payload": payload}
 
 # =========================================================
-# Articles API (Snapshot-first → Firestore → disk cache)
+# Articles API (Firestore → disk cache)
 # =========================================================
 @app.route("/articles", methods=["GET", "OPTIONS"])
 def list_articles():
@@ -346,7 +269,6 @@ def list_articles():
     except Exception:
         raw_limit = 0
 
-    # limit logic
     if is_search:
         limit = min(raw_limit or 50, 500)
         window = min(max(limit, 200), FETCH_WINDOW)
@@ -354,43 +276,18 @@ def list_articles():
         limit = min(raw_limit or 150, 150)
         window = FETCH_WINDOW
 
-    # 0) Disk cache only
     if cache_only:
         docs = _read_cache()
         resp = jsonify(docs[:limit])
         resp.headers["X-Source"] = "disk"
         return resp
 
-    # 1) Memory cache
     mem = _mem_get_articles(feed, q)
     if mem is not None:
         resp = jsonify(mem[:limit])
         resp.headers["X-Source"] = "mem"
         return resp
 
-    # 2) SNAPSHOT-first (FAST) for non-search (home + feeds)
-    if not is_search:
-        snap_payload = None
-        if feed:
-            snap_payload = _get_snapshot_feed(feed.lower())
-        else:
-            snap_payload = _get_snapshot_latest()
-
-        if snap_payload and isinstance(snap_payload.get("items"), list) and snap_payload["items"]:
-            items = snap_payload["items"]
-
-            def _k(d):
-                return _parse_ts_maybe(d.get("ingestedAt") or d.get("publishedAt"))
-            items.sort(key=_k, reverse=True)
-
-            _mem_set_articles(feed, q, items)
-
-            resp = jsonify(items[:limit])
-            resp.headers["X-Source"] = "snapshot"
-            resp.headers["X-Snapshot-At"] = str(snap_payload.get("generatedAt") or "")
-            return resp
-
-    # 3) Firestore (fallback)
     docs = []
     from_cache = False
 
@@ -414,7 +311,6 @@ def list_articles():
         docs = _read_cache()
         from_cache = True
 
-    # filters
     if feed:
         docs = [d for d in docs if (d.get("feed") or "").lower() == feed.lower()]
     if q:
@@ -483,7 +379,7 @@ def search_articles():
     return jsonify(results[:limit])
 
 # =========================================================
-# METRICS + TRENDING (Upgrade 2)
+# METRICS + TRENDING
 # =========================================================
 @app.route("/metrics/event", methods=["POST", "OPTIONS"])
 def metrics_event():
@@ -506,7 +402,6 @@ def metrics_event():
 
         inc_field = {"view": "v", "click": "c", "share": "s"}[typ]
 
-        # ensure doc exists
         docref.set({"createdAt": firestore.SERVER_TIMESTAMP}, merge=True)
 
         updates = {
@@ -547,7 +442,6 @@ def trending():
 
 @app.post("/tasks/recompute_trending")
 def recompute_trending():
-    # protect with secret header token
     token = request.headers.get("X-CRON-TOKEN", "")
     if not CRON_TOKEN or token != CRON_TOKEN:
         return jsonify({"ok": False, "error": "unauthorized"}), 401
@@ -557,15 +451,13 @@ def recompute_trending():
         today = _utc_day_id(now)
         yesterday = _utc_day_id(now - timedelta(days=1))
 
-        # read today + yesterday (covers last 24h window)
         day_docs = []
         for day_id in (today, yesterday):
             s = db.collection("metrics_24h").document(day_id).get()
             if s.exists:
                 day_docs.append(s.to_dict() or {})
 
-        # aggregate counters
-        agg = {}  # sha1 -> {url,v,c,s}
+        agg = {}
         for d in day_docs:
             counters = d.get("counters") or {}
             for k, v in counters.items():
@@ -586,7 +478,6 @@ def recompute_trending():
             }, merge=True)
             return jsonify({"ok": True, "items": 0}), 200
 
-        # pull recent articles window (keep it cheap)
         recent = []
         qref = coll.order_by("ingestedAt", direction=firestore.Query.DESCENDING).limit(600)
         for _doc in qref.stream(retry=None, timeout=15):
@@ -600,7 +491,7 @@ def recompute_trending():
         def _score(article: dict, m: dict) -> float:
             ts = _parse_ts_maybe(article.get("publishedAt") or article.get("ingestedAt"))
             age_mins = max(0.0, (now - ts).total_seconds() / 60.0)
-            rec = max(0.0, 1440.0 - age_mins) / 1440.0  # 1.0 fresh -> 0.0 old
+            rec = max(0.0, 1440.0 - age_mins) / 1440.0
 
             v = m["v"]; c = m["c"]; s = m["s"]
             base = (v * 1.0) + (c * 3.0) + (s * 8.0)
@@ -636,6 +527,182 @@ def recompute_trending():
     except Exception as e:
         log.exception("recompute_trending failed")
         return jsonify({"ok": False, "error": str(e)}), 500
+
+# =========================================================
+# AI Headline Rewrite Worker (calls OpenAI only if enabled)
+# =========================================================
+def _openai_rewrite_title(source_title: str, feed: str = "") -> str:
+    """
+    Return a rewritten headline.
+    Uses OpenAI Responses API via raw HTTPS (no extra dependency).
+    """
+    if not OPENAI_API_KEY:
+        raise RuntimeError("OPENAI_API_KEY not set")
+    if not source_title or not source_title.strip():
+        raise RuntimeError("empty title")
+
+    system = (
+        "You rewrite news headlines for a Nigerian news site. "
+        "Keep it accurate, short, and catchy. No clickbait lies. "
+        "Keep names, teams, and places correct."
+    )
+    user = (
+        f"Feed: {feed or 'general'}\n"
+        f"Original headline:\n{source_title}\n\n"
+        "Rewrite it into ONE improved headline (max 90 characters). "
+        "No quotes, no emojis, no hashtags."
+    )
+
+    # OpenAI Responses API
+    url = "https://api.openai.com/v1/responses"
+    headers = {
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    body = {
+        "model": AI_MODEL,
+        "input": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        "temperature": 0.5,
+    }
+
+    r = requests.post(url, headers=headers, json=body, timeout=25)
+    if r.status_code >= 400:
+        raise RuntimeError(f"OpenAI error {r.status_code}: {r.text[:300]}")
+
+    data = r.json()
+    # responses output_text convenience
+    txt = ""
+    try:
+        txt = data.get("output_text") or ""
+    except Exception:
+        txt = ""
+    txt = (txt or "").strip()
+    if not txt:
+        # fallback: try to dig
+        try:
+            out = data.get("output") or []
+            for item in out:
+                if item.get("type") == "message":
+                    for c in item.get("content") or []:
+                        if c.get("type") == "output_text":
+                            txt = (c.get("text") or "").strip()
+                            break
+        except Exception:
+            pass
+    txt = (txt or "").strip()
+    return txt
+
+@app.get("/ai/status")
+def ai_status():
+    # lightweight counters
+    try:
+        q1 = coll.where("ai.headline.status", "==", "pending").limit(1).stream()
+        pending_any = next(q1, None) is not None
+    except Exception:
+        pending_any = None
+    return jsonify({
+        "ok": True,
+        "aiEnabled": AI_ENABLED,
+        "model": AI_MODEL if AI_ENABLED else None,
+        "hasOpenAIKey": bool(OPENAI_API_KEY),
+        "pendingExists": pending_any,
+    }), 200
+
+@app.post("/tasks/ai_rewrite_headlines")
+def ai_rewrite_headlines():
+    # protect with secret header token
+    token = request.headers.get("X-AI-TOKEN", "")
+    if not AI_TASK_TOKEN or token != AI_TASK_TOKEN:
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+
+    if not AI_ENABLED:
+        return jsonify({"ok": False, "error": "AI_DISABLED"}), 400
+
+    if not OPENAI_API_KEY:
+        return jsonify({"ok": False, "error": "OPENAI_API_KEY_MISSING"}), 400
+
+    try:
+        limit = int(request.args.get("limit", "10"))
+    except Exception:
+        limit = 10
+    limit = _clamp(limit, 1, 40)
+
+    processed = 0
+    rewritten = 0
+    failed = 0
+
+    # fetch pending (newest first)
+    qref = coll.where("ai.headline.status", "==", "pending") \
+               .order_by("ingestedAt", direction=firestore.Query.DESCENDING) \
+               .limit(limit)
+
+    docs = list(qref.stream(retry=None, timeout=20))
+    if not docs:
+        return jsonify({"ok": True, "processed": 0, "rewritten": 0, "failed": 0}), 200
+
+    for snap in docs:
+        processed += 1
+        ref = coll.document(snap.id)
+        d = snap.to_dict() or {}
+
+        src_title = (d.get("sourceTitle") or d.get("title") or "").strip()
+        feed = (d.get("feed") or "").strip()
+
+        # set "processing" first (prevents double-run)
+        try:
+            ref.set({
+                "ai": {
+                    "headline": {
+                        "status": "processing",
+                        "startedAt": firestore.SERVER_TIMESTAMP,
+                        "error": ""
+                    }
+                }
+            }, merge=True)
+        except Exception:
+            pass
+
+        try:
+            new_title = _openai_rewrite_title(src_title, feed=feed)
+            # basic guard: must be different-ish
+            if not new_title or len(new_title) < 12:
+                raise RuntimeError("rewrite too short/empty")
+
+            # write back (keep original in sourceTitle/sourceTitle_first)
+            ref.set({
+                "title": new_title,
+                "title_lower": new_title.lower(),
+                "ai": {
+                    "headline": {
+                        "status": "done",
+                        "doneAt": firestore.SERVER_TIMESTAMP,
+                        "error": ""
+                    }
+                }
+            }, merge=True)
+            rewritten += 1
+
+        except Exception as e:
+            failed += 1
+            ref.set({
+                "ai": {
+                    "headline": {
+                        "status": "failed",
+                        "error": str(e)[:240],
+                        "doneAt": firestore.SERVER_TIMESTAMP,
+                    }
+                }
+            }, merge=True)
+
+    return jsonify({
+        "ok": True,
+        "processed": processed,
+        "rewritten": rewritten,
+        "failed": failed
+    }), 200
 
 # ----------------- Image proxy (streamed, memory-safe) -----------------
 @app.route("/img", methods=["GET"])
@@ -688,7 +755,6 @@ _BAD_HOST_BITS = (
     "facebook.com/tr",
 )
 
-# Cache: url -> {ts, img}
 _PICK_CACHE = {}
 
 def _pick_cache_get(url: str):
@@ -958,8 +1024,6 @@ def diag():
         "cacheMtime": None,
         "hasDoc": False,
         "sampleCount": 0,
-        "snapshotLatest": SNAPSHOT_LATEST_URL or "",
-        "snapshotFeedBase": SNAPSHOT_FEED_BASE or "",
     }
     try:
         if os.path.exists(CACHE_PATH):
@@ -972,7 +1036,7 @@ def diag():
         sample = list(coll.limit(3).stream(retry=None, timeout=10))
         info["sampleCount"] = len(sample)
         info["hasDoc"] = bool(sample)
-    except ResourceExhausted as e:
+    except ResourceExhausted:
         info["ok"] = True
         info["quota"] = "exhausted"
         info["note"] = "serving cache"
@@ -1043,7 +1107,6 @@ def read(slug):
     }
     return render_template("read.html", article=doc, canonical=request.url, **og)
 
-# ----------------- Redirect → canonical /read/<slug> -----------------
 @app.get("/r/<doc_id>")
 def r_redirect(doc_id):
     s = _get_doc_by_id(doc_id)
@@ -1054,7 +1117,6 @@ def r_redirect(doc_id):
     slug = d.get("slug") or slugify(d.get("cleanTitle") or d.get("title"))
     return redirect(url_for("read", slug=slug, id=s.id), code=301)
 
-# ----------------- Simple sitemap (last 100) -----------------
 @app.get("/sitemap.xml")
 def sitemap():
     items = coll.order_by("publishedAt", direction=firestore.Query.DESCENDING).limit(100).stream()
@@ -1141,7 +1203,8 @@ from atexit import register
 
 def run_ingest_job():
     log.info("🚀 Ingest job starting…")
-    subprocess.run(["python", "scripts/ingest.py"], check=False)
+    # ✅ you said you have main.py in repo root
+    subprocess.run(["python", "main.py"], check=False)
     log.info("✅ Ingest job finished")
 
 if RUN_JOBS:
