@@ -1,8 +1,9 @@
-# main.py (FINAL — put this in REPO ROOT)
+# main.py (UPDATED — AI rewrite queue marker added, no ingestion slowdown)
 import os
 import re
 import json
 import gzip
+import hashlib
 import logging
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
@@ -16,7 +17,7 @@ import requests
 from google.cloud import firestore
 from google.oauth2 import service_account
 
-# Firebase Storage (GCS) client
+# Firebase Storage (GCS) client (optional — snapshots only if bucket is set)
 from google.cloud import storage
 
 # Optional modern Firestore filter (silences positional-arg warning if available)
@@ -28,13 +29,16 @@ except Exception:
 # ----------------- Config -----------------
 PROJECT_ID = (os.getenv("GOOGLE_CLOUD_PROJECT") or "").strip()
 
-# Firebase Storage bucket (Cloud Storage for Firebase)
+# Firebase Storage bucket (Cloud Storage for Firebase) — OPTIONAL
 FIREBASE_STORAGE_BUCKET = (os.getenv("FIREBASE_STORAGE_BUCKET") or "").strip()
 
 # Snapshot settings
 SNAPSHOT_LIMIT_HOME = int(os.getenv("SNAPSHOT_LIMIT_HOME", "150"))          # latest combined
 SNAPSHOT_LIMIT_PER_FEED = int(os.getenv("SNAPSHOT_LIMIT_PER_FEED", "200"))  # per feed
 SNAPSHOT_ARCHIVE = os.getenv("SNAPSHOT_ARCHIVE", "1").strip() == "1"        # keep timestamp copies too
+
+# AI marker toggle (only affects Firestore fields; no AI calls)
+AI_MARK_PENDING = os.getenv("AI_MARK_PENDING", "1").strip() == "1"
 
 FALLBACK_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -132,6 +136,11 @@ def iso(dt):
     except Exception:
         pass
     return ""
+
+
+def _title_hash(title: str) -> str:
+    t = (title or "").strip().lower()
+    return hashlib.sha1(t.encode("utf-8")).hexdigest()
 
 
 def parse_published(entry):
@@ -389,19 +398,16 @@ def _extract_from_meta_and_dom(html: str, page_url: str) -> List[str]:
     if not html:
         return urls
 
-    # OG/Twitter/meta
     for m in re.finditer(
         r'<meta[^>]+(?:property|name)=["\'](?:og:image(?::secure_url|:url)?|twitter:image(?::src)?)["\'][^>]+content=["\']([^"\']+)["\']',
         html, re.I
     ):
         urls.append(m.group(1))
 
-    # <link rel="image_src">
     m = re.search(r'<link[^>]+rel=["\']image_src["\'][^>]+href=["\']([^"\']+)["\']', html, re.I)
     if m:
         urls.append(m.group(1))
 
-    # srcset/data-srcset
     for m in re.finditer(r'<(?:source|img)[^>]+srcset=["\']([^"\']+)["\']', html, re.I):
         cand = _pick_from_srcset(m.group(1))
         if cand:
@@ -411,21 +417,17 @@ def _extract_from_meta_and_dom(html: str, page_url: str) -> List[str]:
         if cand:
             urls.append(cand)
 
-    # <figure> first <img>, then general <img>
     for m in re.finditer(r'<figure[^>]*>.*?<img[^>]+src=["\']([^"\']+)["\']', html, re.I | re.S):
         urls.append(m.group(1))
     for m in re.finditer(r'<img[^>]+src=["\']([^"\']+)["\']', html, re.I):
         urls.append(m.group(1))
 
-    # lazy data-*
     for m in re.finditer(r'<img[^>]+data-(?:src|original|lazy|lazy-src)=["\']([^"\']+)["\']', html, re.I):
         urls.append(m.group(1))
 
-    # CSS background-image
     for m in re.finditer(r'background-image\s*:\s*url\((["\']?)([^"\')]+)\1\)', html, re.I):
         urls.append(m.group(2))
 
-    # <noscript>
     for nm in re.finditer(r'<noscript[^>]*>(.*?)</noscript>', html, re.I | re.S):
         part = nm.group(1) or ""
         for m in re.finditer(r'<img[^>]+src=["\']([^"\']+)["\']', part, re.I):
@@ -437,7 +439,6 @@ def _extract_from_meta_and_dom(html: str, page_url: str) -> List[str]:
             if cand:
                 urls.append(cand)
 
-    # AMP link (marker so caller can fetch AMP)
     amp = re.search(r'<link[^>]+rel=["\']amphtml["\'][^>]+href=["\']([^"\']+)["\']', html, re.I)
     amp_url = (amp.group(1) or "").strip() if amp else None
 
@@ -509,7 +510,6 @@ def deep_pick_image(article_url: str, session=None):
         log.info("Deep scrape fetch error: %s -> %s", article_url, e)
         return None
 
-    # Football-first specialized extraction
     foot_img = extract_football_specific_image(article_url, html)
     if foot_img:
         return foot_img
@@ -518,7 +518,6 @@ def deep_pick_image(article_url: str, session=None):
     cands += _extract_from_jsonld(html)
     cands += _extract_from_meta_and_dom(html, article_url)
 
-    # AMP fetch
     amp_hrefs = [u for u in cands if u.endswith("#__AMP_FETCH__")]
     if amp_hrefs:
         try:
@@ -528,7 +527,6 @@ def deep_pick_image(article_url: str, session=None):
         except Exception as e:
             log.info("AMP fetch error: %s -> %s", article_url, e)
 
-    # Clean/dedupe
     cleaned: List[str] = []
     seen = set()
     for u in cands:
@@ -551,7 +549,7 @@ def deep_pick_image(article_url: str, session=None):
             continue
         cleaned.append(u)
 
-    for u in cleaned[:10]:  # speed cap
+    for u in cleaned[:10]:
         if _head_ok(u, sess):
             return u
 
@@ -629,7 +627,6 @@ def find_image_in_entry(entry, feed_name: str):
     """
     Best-effort image finder.
     """
-    # 1) media:*
     for t in (entry.get("media_thumbnail") or []):
         u = (t.get("url") if isinstance(t, dict) else None)
         if u and str(u).startswith(("http://", "https://")) and not looks_like_logo(u):
@@ -639,7 +636,6 @@ def find_image_in_entry(entry, feed_name: str):
         if u and str(u).startswith(("http://", "https://")) and not looks_like_logo(u):
             return u
 
-    # 2) enclosures
     for l in (entry.get("links") or []):
         if isinstance(l, dict) and l.get("rel") == "enclosure":
             ctype = str(l.get("type", "")).lower()
@@ -648,7 +644,6 @@ def find_image_in_entry(entry, feed_name: str):
                 if u and str(u).startswith(("http://", "https://")) and not looks_like_logo(u):
                     return u
 
-    # 3) parse html chunks
     html_chunks: List[str] = []
     if entry.get("summary"):
         html_chunks.append(entry["summary"])
@@ -699,7 +694,6 @@ def find_image_in_entry(entry, feed_name: str):
             if ok(u):
                 return u
 
-    # 4) fallback scrape (budget)
     if link:
         global SCRAPE_BUDGET
         if SCRAPE_BUDGET > 0:
@@ -731,32 +725,88 @@ def find_image_in_entry(entry, feed_name: str):
 def upsert_article(doc: Dict[str, Any]) -> bool:
     """
     Upsert by URL (one doc per URL). Only set ingestedAt when the URL is NEW.
+
+    ✅ AI rewrite marker:
+      - Sets ai.headline.status='pending' ONLY when needed
+      - Uses ai.headline.titleHash to avoid rewriting the same title twice
     """
     url = doc.get("url")
     if not url:
         return False
+
+    now = dt_utc_now()
+    new_hash = _title_hash(doc.get("title") or "")
 
     if FieldFilter:
         existing = list(coll.where(filter=FieldFilter("url", "==", url)).limit(1).stream())
     else:
         existing = list(coll.where("url", "==", url).limit(1).stream())
 
+    # ---------------- Existing ----------------
     if existing:
-        existing_doc = existing[0].to_dict() or {}
+        snap = existing[0]
+        existing_doc = snap.to_dict() or {}
+
+        # keep original ingestedAt if present
         if "ingestedAt" in existing_doc:
             doc["ingestedAt"] = existing_doc["ingestedAt"]
         else:
-            doc["ingestedAt"] = dt_utc_now()
-        coll.document(existing[0].id).set(doc, merge=True)
+            doc["ingestedAt"] = now
+
+        # keep "first seen" publishedAt if yours changes weirdly (optional)
+        # (not enforcing; your current behavior is fine)
+
+        # ✅ AI marker logic (no AI call)
+        if AI_MARK_PENDING:
+            ai = existing_doc.get("ai") or {}
+            headline = ai.get("headline") or {}
+            old_hash = (headline.get("titleHash") or "").strip()
+            old_status = (headline.get("status") or "").strip()
+
+            # If title hash unchanged AND status already in progress/done → don't touch
+            # Else: mark pending so worker can rewrite
+            should_mark = (new_hash != old_hash)
+            if should_mark:
+                doc.setdefault("ai", {})
+                doc["ai"].setdefault("headline", {})
+                doc["ai"]["headline"].update({
+                    "status": "pending",
+                    "titleHash": new_hash,
+                    "requestedAt": now,
+                    "error": "",
+                })
+                # store original/source title (first-seen)
+                doc.setdefault("sourceTitle_first", existing_doc.get("sourceTitle_first") or existing_doc.get("title") or doc.get("title") or "")
+                doc["sourceTitle"] = doc.get("title") or existing_doc.get("title") or ""
+            else:
+                # still store latest sourceTitle for tracking (cheap)
+                doc["sourceTitle"] = doc.get("title") or existing_doc.get("title") or ""
+                doc.setdefault("sourceTitle_first", existing_doc.get("sourceTitle_first") or existing_doc.get("title") or doc.get("title") or "")
+
+        coll.document(snap.id).set(doc, merge=True)
         return True
 
-    doc["ingestedAt"] = dt_utc_now()
+    # ---------------- New ----------------
+    doc["ingestedAt"] = now
+
+    if AI_MARK_PENDING:
+        doc.setdefault("ai", {})
+        doc["ai"].setdefault("headline", {})
+        doc["ai"]["headline"].update({
+            "status": "pending",
+            "titleHash": new_hash,
+            "requestedAt": now,
+            "error": "",
+        })
+        doc["sourceTitle_first"] = doc.get("title") or ""
+        doc["sourceTitle"] = doc.get("title") or ""
+
     coll.add(doc)
     return True
 
 
 # =========================
-# SNAPSHOT BUILD + UPLOAD
+# SNAPSHOT BUILD + UPLOAD (optional)
 # =========================
 def _serialize_article(d: dict) -> dict:
     """Keep snapshots small and stable."""
@@ -889,7 +939,7 @@ def ingest():
 
     log.info("Ingestion done. written=%d skipped=%d", written, skipped)
 
-    # snapshots after ingestion
+    # snapshots after ingestion (optional)
     try:
         build_and_upload_snapshots()
     except Exception as ex:
