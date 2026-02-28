@@ -4,7 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Radiant Waves</title>
-  <link rel="icon" type="image/png" href="img/Radiantwaves nobgedit.png" />
+  <link rel="icon" type="image/png" href="img/Radiantwaves nobgedit1.png" />
+  <link rel="icon" type="image/png" href="img/Radiantwaves nobgedit1.png">
 
   <!-- ✅ Speed: preconnect to your slow domains -->
   <link rel="preconnect" href="https://radiant-waves-1.onrender.com" crossorigin>
@@ -43,7 +44,6 @@
   <div id="rwStatus" class="rw-status">Live • <span id="rwTime">never</span></div>
 
   <!-- HEADER (new structure, but hooks preserved) -->
-  <header class="site-header">
     <!-- Top strip -->
     <div class="header-top">
       <div class="wrap header-top-inner">
@@ -61,9 +61,11 @@
     </div>
 
     <!-- Main header row -->
+       <header class="site-header">
+
     <div class="wrap header-inner">
       <a class="brand" href="#" data-feed="" aria-label="Radiant Waves Home">
-        <img class="brand-logo" src="img/radiantwaves nobgedit.png" alt="RadiantWaves">
+        <img class="brand-logo" src="img/radiantwaves nobgedit1.png" alt="RadiantWaves">
       </a>
 
       <!-- Search (PRESERVE IDs) -->
@@ -74,10 +76,10 @@
         </button>
       </form>
 
-      <button class="menu-btn" id="menuBtn" type="button" aria-label="Open menu" aria-controls="mobileDrawer" aria-expanded="false">
-        <i class="fas fa-bars"></i>
-      </button>
     </div>
+    <button class="menu-btn" id="menuBtn" type="button" aria-label="Open menu" aria-controls="mobileDrawer" aria-expanded="false">
+      <i class="fas fa-bars"></i>
+    </button>
 
     <!-- Nav (PRESERVE .nav-link + data-feed) -->
     <nav class="main-nav-wrap" aria-label="Primary">
