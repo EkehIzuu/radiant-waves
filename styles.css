@@ -60,6 +60,7 @@ a{ color:inherit; }
   color: var(--light-text);
   font-size:.9rem;
   border-bottom: 1px solid rgba(255,255,255,.08);
+    box-shadow: 0 6px 22px rgba(2,6,23,.08);
 }
 .header-top-inner{
   display:flex;
@@ -103,7 +104,7 @@ a{ color:inherit; }
   align-items:center;
   justify-content:space-between;
   gap:18px;
-  padding:14px 0;
+  padding:1px 0;
 }
 
 .brand{
@@ -125,7 +126,7 @@ a{ color:inherit; }
   background: rgba(2,6,23,.04);
   border:1px solid rgba(148,163,184,.35);
   border-radius:999px;
-  padding:8px 10px;
+  padding:0px 0px;
   box-shadow: 0 1px 0 rgba(255,255,255,.7) inset;
   transition: box-shadow .2s ease, border-color .2s ease, transform .2s ease;
 }
@@ -170,6 +171,7 @@ a{ color:inherit; }
   color:#fff;
   background: linear-gradient(135deg, var(--primary-color), #ff7a00);
   box-shadow: 0 10px 20px rgba(255,61,0,.18);
+  margin-left: 40px;
 }
 
 .drawer-backdrop{
@@ -491,10 +493,6 @@ a{ color:inherit; }
   .footer-inner{ grid-template-columns: repeat(2, 1fr); }
 }
 @media (max-width: 768px){
-  .header-top-inner{
-    flex-direction:column;
-    align-items:flex-start;
-  }
   .datetime{ gap:12px; flex-wrap:wrap; }
   .header-inner{
     flex-direction:column;
@@ -502,7 +500,6 @@ a{ color:inherit; }
   }
   .brand-logo{ width: 200px; }
   .search{ width:100%; }
-  .search input{ width:100%; }
   .footer-inner{ grid-template-columns: 1fr; }
 }
 
@@ -856,30 +853,33 @@ a{ color:inherit; }
   }
 
   .header-top-inner{
-    display: flex !important;
+    /* display: flex !important;
     flex-direction: column !important;
     align-items: flex-start !important;
-    gap: 8px !important;
+    gap: 8px !important; */
+    display: none;
   }
 
   .header-inner{
     display: flex !important;
-    flex-direction: column !important;
+    flex-direction: row !important; 
     align-items: stretch !important;
     gap: 10px !important;
+    padding: 8px;
   }
-
+  .header-inner img{
+    width: 50%;
+  }
   #searchForm.search{
     width: 100% !important;
-    display: flex !important;
-    align-items: center !important;
+    /* display: flex !important; */
+    /* align-items: center !important; */
     gap: 8px !important;
   }
-
   #searchForm.search input,
   #searchForm.search #q{
     flex: 1 1 auto !important;
-    width: 100% !important;
+    width: 50% !important;
     min-width: 0 !important;
   }
 
