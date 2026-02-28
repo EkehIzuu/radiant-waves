@@ -172,6 +172,7 @@ a{ color:inherit; }
   background: linear-gradient(135deg, var(--primary-color), #ff7a00);
   box-shadow: 0 10px 20px rgba(255,61,0,.18);
   margin-left: 40px;
+   margin-bottom: 5px;
 }
 
 .drawer-backdrop{
