@@ -125,6 +125,71 @@ function baseSiteUrl() {
 }
 
 /* =======================
+   SOURCE LABEL (NEW)
+   - prevents "Google Alert - ..." from showing
+   - derives source from article URL domain
+======================= */
+function hostFromUrl(u) {
+  try { return new URL(u).hostname.replace(/^www\./, "").toLowerCase(); }
+  catch { return ""; }
+}
+
+function prettifyHost(host) {
+  if (!host) return "";
+
+  const map = {
+    "bbc.com": "BBC",
+    "bbc.co.uk": "BBC",
+    "punchng.com": "Punch",
+    "guardian.ng": "The Guardian",
+    "vanguardngr.com": "Vanguard",
+    "premiumtimesng.com": "Premium Times",
+    "dailypost.ng": "Daily Post",
+    "channels.tv": "Channels TV",
+    "thecable.ng": "TheCable",
+    "thenationonlineng.net": "The Nation",
+    "nairametrics.com": "Nairametrics",
+    "goal.com": "GOAL",
+    "skysports.com": "Sky Sports",
+    "espn.com": "ESPN",
+    "reuters.com": "Reuters",
+  };
+
+  if (map[host]) return map[host];
+
+  // handle subdomains: sports.bbc.co.uk -> bbc.co.uk
+  const parts = host.split(".");
+  const root2 = parts.slice(-2).join(".");
+  const root3 = parts.slice(-3).join(".");
+  if (map[root3]) return map[root3];
+  if (map[root2]) return map[root2];
+
+  // fallback: make readable from first segment
+  const name = host.split(".")[0] || host;
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
+function getCleanSource(a) {
+  const rawSource = String(
+    a?.sourceName || a?.publisher || a?.site || a?.origin || a?.source || ""
+  ).trim();
+
+  // Detect unwanted feed labels
+  const isFeedLabel = /google\s*alert|google\s*news|alert\s*-|feed\b|politics|football|celebrity/i.test(rawSource);
+
+  const host = hostFromUrl(a?.url || "");
+  const derived = prettifyHost(host);
+
+  // Prefer derived when source looks like a feed label OR is empty
+  if (derived && (isFeedLabel || !rawSource)) return derived;
+
+  // If it's a feed label and we can't derive, hide it
+  if (isFeedLabel) return "Source";
+
+  return rawSource || derived || "Source";
+}
+
+/* =======================
    METRICS (Trending)
 ======================= */
 const RW_METRIC_COOLDOWN_MS = 45 * 60 * 1000; // 45 mins per device per article per event
@@ -520,7 +585,7 @@ function cardHtml(a, { sectionLabel = "News" } = {}) {
       </div>
       <div class="content">
         <div class="meta" style="display:flex;align-items:center;gap:10px;">
-          <span>${escapeHtml(a.source || "")} • ${fmtTime(a.publishedAt)}</span>
+          <span>Source: ${escapeHtml(getCleanSource(a))} • ${escapeHtml(fmtTime(a.publishedAt))}</span>
           <span style="margin-left:auto;display:inline-flex;">${shareBtnHtml(a)}</span>
         </div>
         <p class="summary">${escapeHtml(summaryText)}</p>
@@ -618,7 +683,7 @@ async function showArticleView(sourceUrl = "") {
 
         <div style="padding:16px 16px 18px;">
           <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;color:#667085;font-size:13px;font-weight:700;">
-            <span>${escapeHtml(a.source || "")}</span>
+            <span>Source: ${escapeHtml(getCleanSource({ ...a, url: sourceUrl }))}</span>
             <span>•</span>
             <span>${escapeHtml(fmtTime(a.publishedAt))}</span>
             ${a.author ? `<span>•</span><span>${escapeHtml(a.author)}</span>` : ``}
@@ -936,7 +1001,7 @@ async function loadHome() {
               <p>${escapeHtml(sum)}</p>
               <div class="news-meta" style="display:flex;gap:10px;align-items:center;">
                 <span><i class="far fa-clock"></i> ${escapeHtml(fmtTime(a.publishedAt))}</span>
-                <span style="opacity:.8;">${escapeHtml(a.source || "")}</span>
+                <span style="opacity:.8;">Source: ${escapeHtml(getCleanSource(a))}</span>
                 ${shareBtnHtml(a)}
               </div>
             </div>
