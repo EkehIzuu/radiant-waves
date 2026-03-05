@@ -1,26 +1,37 @@
-name: Build SEO pages + sitemap
+name: SEO Build (Sitemap + SEO pages + IndexNow)
 
 on:
-  push:
-    branches: [ "main" ]
+  workflow_dispatch:
   schedule:
-    - cron: "0 */6 * * *" # every 6 hours
+    # every 6 hours
+    - cron: "0 */6 * * *"
 
 permissions:
   contents: write
 
+concurrency:
+  group: seo-build
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
           node-version: "20"
 
       - name: Install deps
-        run: npm init -y && npm i firebase-admin
+        run: |
+          npm init -y
+          npm i firebase-admin
 
       - name: Build SEO pages
         env:
@@ -32,6 +43,22 @@ jobs:
         run: |
           git config user.name "rw-seo-bot"
           git config user.email "rw-seo-bot@users.noreply.github.com"
+
           git add sitemap.xml rss.xml robots.txt news/ || true
-          git commit -m "Update sitemap + SEO pages" || echo "No changes"
+
+          git diff --cached --quiet && echo "No changes" && exit 0
+          git commit -m "Update sitemap + SEO pages"
           git push
+
+      - name: Ping IndexNow
+        env:
+          INDEXNOW_KEY: ${{ secrets.INDEXNOW_KEY }}
+          HOST: "radiant-waves.com.ng"
+        run: |
+          if [ -z "$INDEXNOW_KEY" ]; then
+            echo "Missing secret: INDEXNOW_KEY"
+            exit 1
+          fi
+
+          curl -s "https://api.indexnow.org/indexnow?url=https://$HOST/&key=$INDEXNOW_KEY" || true
+          curl -s "https://api.indexnow.org/indexnow?url=https://$HOST/sitemap.xml&key=$INDEXNOW_KEY" || true
