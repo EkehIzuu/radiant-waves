@@ -203,9 +203,15 @@
       if (t) t.textContent = time;
     }
     updateDateTime();
-    setInterval(updateDateTime, 60000);
-  </script>
+    setInterval(updateDateTime, 60000)
+      </script>
+  <script>
+window.RW_SNAPSHOT_LATEST =
+"https://radiant-waves.com.ng/snapshots/latest.json.gz";
 
+window.RW_SNAPSHOT_FEED_BASE =
+"https://radiant-waves.com.ng/snapshots/";
+</script>
   <!-- ✅ app module (settings.js is imported inside app.js already, so don't load it twice) -->
   <script type="module" src="app.js"></script>
 </body>
