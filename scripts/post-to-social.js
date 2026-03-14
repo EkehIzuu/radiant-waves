@@ -113,17 +113,39 @@ function wrapLines(text, maxChars = 42) {
 /** Fetch and prepare article image: resize, white border. Returns buffer or null. */
 async function fetchArticleImage(imageUrl) {
   if (!imageUrl || typeof imageUrl !== "string") return null;
+  const url = imageUrl.trim();
+  if (!url.startsWith("http")) return null;
   try {
-    const res = await fetch(imageUrl, { signal: AbortSignal.timeout(10000) });
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(15000),
+      headers: { "User-Agent": "RadiantWaves/1.0 (News Bot)" },
+      redirect: "follow",
+    });
     if (!res.ok) return null;
     const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length < 100) return null;
     return await sharp(buf)
       .resize(1180, 680, { fit: "cover" })
       .extend({ top: 10, bottom: 10, left: 10, right: 10, background: "#ffffff" })
       .toBuffer();
-  } catch {
+  } catch (e) {
+    console.warn("Article image fetch failed:", url.slice(0, 50) + "...", e.message);
     return null;
   }
+}
+
+/** Placeholder for image area when article has no image: darker strip + "Radiant Waves". */
+async function makePlaceholderImage() {
+  const W = 1200;
+  const H = 700;
+  const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+  <rect width="${W}" height="${H}" fill="#e65c1a"/>
+  <rect x="10" y="10" width="${W - 20}" height="${H - 20}" fill="#f47429" stroke="#fff" stroke-width="2" rx="8"/>
+  <text x="${W / 2}" y="${H / 2}" font-family="Arial, sans-serif" font-size="36" font-weight="700" fill="#ffffff" text-anchor="middle" dominant-baseline="middle" opacity="0.9">RADIANT WAVES</text>
+  <text x="${W / 2}" y="${H / 2 + 50}" font-family="Arial, sans-serif" font-size="18" fill="#ffffff" text-anchor="middle" opacity="0.7">Article image unavailable</text>
+</svg>`;
+  return sharp(Buffer.from(svg)).png().toBuffer();
 }
 
 /**
@@ -158,22 +180,22 @@ async function generateArticleCard(title, articleImageUrl) {
     .png()
     .toBuffer();
 
-  // Bottom section: separator + headline + "Radiant Waves" + accent line
+  // Bottom section: separator + headline (bold + stroke for visibility) + "Radiant Waves" + accent line
   const textSvg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${TEXT_H}" viewBox="0 0 ${W} ${TEXT_H}">
   <!-- separator line with end markers -->
   <line x1="80" y1="20" x2="${W - 80}" y2="20" stroke="#e0e0e0" stroke-width="1"/>
   <rect x="60" y="15" width="8" height="10" fill="#999"/>
   <rect x="${W - 68}" y="15" width="8" height="10" fill="#999"/>
-  <!-- headline -->
-  <text x="60" y="${startY}" font-family="Arial, sans-serif" font-size="48" font-weight="700" fill="${HEADLINE_COLOR}" text-anchor="start">
+  <!-- headline: extra bold (800), dark stroke so it pops on orange -->
+  <text x="60" y="${startY}" font-family="Arial, sans-serif" font-size="52" font-weight="800" fill="${HEADLINE_COLOR}" stroke="#1a4d6d" stroke-width="2" text-anchor="start" style="paint-order: stroke fill;">
     ${tspans}
   </text>
   <!-- read more hint -->
   <line x1="60" y1="${TEXT_H - 100}" x2="120" y2="${TEXT_H - 100}" stroke="${HEADLINE_COLOR}" stroke-width="2"/>
-  <text x="140" y="${TEXT_H - 98}" font-family="Arial, sans-serif" font-size="14" fill="${HEADLINE_COLOR}">▶▶</text>
+  <text x="140" y="${TEXT_H - 98}" font-family="Arial, sans-serif" font-size="14" font-weight="700" fill="${HEADLINE_COLOR}">▶▶</text>
   <!-- Radiant Waves branding bottom right -->
-  <text x="${W - 40}" y="${TEXT_H - 55}" font-family="Arial, sans-serif" font-size="22" font-weight="600" fill="#ffffff" text-anchor="end">Radiant Waves</text>
+  <text x="${W - 40}" y="${TEXT_H - 55}" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#ffffff" text-anchor="end">Radiant Waves</text>
   <line x1="${W - 220}" y1="${TEXT_H - 38}" x2="${W - 40}" y2="${TEXT_H - 38}" stroke="${ACCENT_COLOR}" stroke-width="3"/>
 </svg>`;
 
@@ -186,6 +208,9 @@ async function generateArticleCard(title, articleImageUrl) {
   const imageBuf = await fetchArticleImage(articleImageUrl);
   if (imageBuf) {
     composites.unshift({ input: imageBuf, top: 0, left: 0 });
+  } else {
+    const placeholderBuf = await makePlaceholderImage();
+    composites.unshift({ input: placeholderBuf, top: 0, left: 0 });
   }
 
   return sharp(orangeBuf)
@@ -286,7 +311,13 @@ async function main() {
   const cleanTitle = stripHtml(title);
   const url = buildArticleUrl(article.data, article.id);
   const articleImageUrl =
-    article.data.image || article.data.imageUrl || article.data.ogImage || "";
+    article.data.image ||
+    article.data.imageUrl ||
+    article.data.ogImage ||
+    article.data.thumbnail ||
+    article.data.enclosure?.url ||
+    article.data.media?.url ||
+    "";
 
   console.log("Posting:", cleanTitle.slice(0, 60) + "...");
   console.log("Link:", url);
