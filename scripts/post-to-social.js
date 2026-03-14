@@ -109,10 +109,14 @@ function getImageFromBuiltPage(slug) {
   }
 }
 
-// Radiant Waves card colors (Sahara-style layout, our branding)
+// Card styling – keep in sync with card-preview.html (edit there, then update here)
 const CARD_BG = "#f47429";
 const HEADLINE_COLOR = "#55a2ce";
+const HEADLINE_FILL = "#ffffff";
 const ACCENT_COLOR = "#55a2ce";
+const SEPARATOR_LINE = "#e0e0e0";
+const SEPARATOR_DOTS = "#999";
+const READMORE_COLOR = "#ffffff";
 
 /** Word-wrap into lines of at most maxChars. */
 function wrapLines(text, maxChars = 42) {
@@ -170,12 +174,13 @@ async function makePlaceholderImage() {
 }
 
 /**
- * Generate card: article image on top, headline below, Radiant Waves branding.
- * Padding everywhere; headline white + blue outline; text 2x bolder.
+ * Generate card – layout and style match card-preview.html.
+ * When you change the preview, copy the same values here (pad, image-h, text-h, font sizes, etc.).
  */
 async function generateArticleCard(title, articleImageUrl) {
+  // Layout – must match card-preview.html .card
   const W = 1200;
-  const PAD = 56; // padding everywhere (top, sides, bottom, between)
+  const PAD = 56;
   const TOP_PADDING = PAD;
   const SIDE_PAD = PAD;
   const IMAGE_H = 660;
@@ -186,7 +191,7 @@ async function generateArticleCard(title, articleImageUrl) {
 
   const lines = wrapLines(title, 36);
   const lineHeight = 66;
-  const startY = 120 + PAD; // headline with top padding inside text block
+  const startY = 120 + PAD;
   const tspans = lines
     .map(
       (ln, i) =>
@@ -211,22 +216,22 @@ async function generateArticleCard(title, articleImageUrl) {
     .png()
     .toBuffer();
 
-  // Text section: padded, separator + headline (2x bolder) + footer
+  // Text section – values match card-preview.html
   const textSvg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${TEXT_H}" viewBox="0 0 ${W} ${TEXT_H}">
-  <!-- separator with padding -->
-  <line x1="${SIDE_PAD + 24}" y1="${sepY}" x2="${W - SIDE_PAD - 24}" y2="${sepY}" stroke="#e0e0e0" stroke-width="2"/>
-  <rect x="${SIDE_PAD}" y="${sepY - 10}" width="12" height="14" fill="#999"/>
-  <rect x="${W - SIDE_PAD - 12}" y="${sepY - 10}" width="12" height="14" fill="#999"/>
-  <!-- headline: white + blue outline, 2x bolder (thick stroke + 900 weight) -->
-  <text x="${SIDE_PAD}" y="${startY}" font-family="Arial, sans-serif" font-size="56" font-weight="900" fill="#ffffff" stroke="${HEADLINE_COLOR}" stroke-width="3" text-anchor="start" style="paint-order: stroke fill;">
+  <!-- separator -->
+  <line x1="${SIDE_PAD + 24}" y1="${sepY}" x2="${W - SIDE_PAD - 24}" y2="${sepY}" stroke="${SEPARATOR_LINE}" stroke-width="2"/>
+  <rect x="${SIDE_PAD}" y="${sepY - 10}" width="12" height="14" fill="${SEPARATOR_DOTS}"/>
+  <rect x="${W - SIDE_PAD - 12}" y="${sepY - 10}" width="12" height="14" fill="${SEPARATOR_DOTS}"/>
+  <!-- headline -->
+  <text x="${SIDE_PAD}" y="${startY}" font-family="Arial, sans-serif" font-size="56" font-weight="900" fill="${HEADLINE_FILL}" stroke="${HEADLINE_COLOR}" stroke-width="3" text-anchor="start" style="paint-order: stroke fill;">
     ${tspans}
   </text>
-  <!-- read more - padded, 2x bolder -->
-  <line x1="${SIDE_PAD}" y1="${readMoreY}" x2="${SIDE_PAD + 100}" y2="${readMoreY}" stroke="#ffffff" stroke-width="5"/>
-  <text x="${SIDE_PAD + 116}" y="${readMoreY + 8}" font-family="Arial, sans-serif" font-size="26" font-weight="900" fill="#ffffff">▶▶</text>
-  <!-- Radiant Waves - padded, 2x bolder -->
-  <text x="${W - SIDE_PAD}" y="${brandY}" font-family="Arial, sans-serif" font-size="36" font-weight="900" fill="#ffffff" text-anchor="end">Radiant Waves</text>
+  <!-- read more -->
+  <line x1="${SIDE_PAD}" y1="${readMoreY}" x2="${SIDE_PAD + 100}" y2="${readMoreY}" stroke="${READMORE_COLOR}" stroke-width="5"/>
+  <text x="${SIDE_PAD + 116}" y="${readMoreY + 8}" font-family="Arial, sans-serif" font-size="26" font-weight="900" fill="${READMORE_COLOR}">▶▶</text>
+  <!-- Radiant Waves -->
+  <text x="${W - SIDE_PAD}" y="${brandY}" font-family="Arial, sans-serif" font-size="36" font-weight="900" fill="${HEADLINE_FILL}" text-anchor="end">Radiant Waves</text>
   <line x1="${W - SIDE_PAD - 280}" y1="${lineY}" x2="${W - SIDE_PAD}" y2="${lineY}" stroke="${ACCENT_COLOR}" stroke-width="5"/>
 </svg>`;
 
