@@ -8,6 +8,8 @@
 
 import admin from "firebase-admin";
 import sharp from "sharp";
+import fs from "fs";
+import path from "path";
 
 const SITE = "https://radiant-waves.com.ng";
 const COLLECTION = process.env.FIRESTORE_COLLECTION || "articles";
@@ -68,6 +70,12 @@ async function getNextUnpostedArticle(db) {
   return null;
 }
 
+/** Get slug for an article (same logic as build-seo-pages). */
+function getArticleSlug(data, docId) {
+  const title = data.title || data.headline || "";
+  return data.slug || slugify(title) || docId || "story";
+}
+
 /** Build article URL: prefer stored canonical URL if it's our site, else build from slug (same as build-seo-pages). */
 function buildArticleUrl(data, docId) {
   const canonical =
@@ -83,9 +91,21 @@ function buildArticleUrl(data, docId) {
   ) {
     return canonical.replace(/\#.*$/, "").replace(/\?.*$/, "").replace(/\/?$/, "") + "/";
   }
-  const title = data.title || data.headline || "";
-  const slug = data.slug || slugify(title) || docId || "story";
+  const slug = getArticleSlug(data, docId);
   return `${SITE}/news/${slug}/`;
+}
+
+/** Get image URL from built article page (news/{slug}/index.html) og:image meta. Used when Firestore has no image. */
+function getImageFromBuiltPage(slug) {
+  const htmlPath = path.join(process.cwd(), "news", slug, "index.html");
+  try {
+    if (!fs.existsSync(htmlPath)) return "";
+    const html = fs.readFileSync(htmlPath, "utf8");
+    const match = html.match(/<meta\s+property="og:image"\s+content="([^"]+)"/i);
+    return match ? match[1].replace(/&amp;/g, "&") : "";
+  } catch {
+    return "";
+  }
 }
 
 // Radiant Waves card colors (Sahara-style layout, our branding)
@@ -310,7 +330,8 @@ async function main() {
   const title = article.data.title || article.data.headline || "Radiant Waves";
   const cleanTitle = stripHtml(title);
   const url = buildArticleUrl(article.data, article.id);
-  const articleImageUrl =
+  const slug = getArticleSlug(article.data, article.id);
+  let articleImageUrl =
     article.data.image ||
     article.data.imageUrl ||
     article.data.ogImage ||
@@ -318,6 +339,10 @@ async function main() {
     article.data.enclosure?.url ||
     article.data.media?.url ||
     "";
+  if (!articleImageUrl) {
+    articleImageUrl = getImageFromBuiltPage(slug);
+    if (articleImageUrl) console.log("Using image from built page og:image");
+  }
 
   console.log("Posting:", cleanTitle.slice(0, 60) + "...");
   console.log("Link:", url);
