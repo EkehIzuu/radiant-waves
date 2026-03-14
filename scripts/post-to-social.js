@@ -217,22 +217,25 @@ async function generateArticleCard(title, articleImageUrl, imageBufferPreloaded 
     .png()
     .toBuffer();
 
-  // Text section – values match card-preview.html
+  // Text section – clean white headline; extra design touches (our own, not Sahara)
   const textSvg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${TEXT_H}" viewBox="0 0 ${W} ${TEXT_H}">
+  <!-- left accent bar (editorial style, our touch) -->
+  <rect x="${SIDE_PAD}" y="${sepY}" width="5" height="220" fill="${ACCENT_COLOR}" opacity="0.85"/>
   <!-- separator -->
   <line x1="${SIDE_PAD + 24}" y1="${sepY}" x2="${W - SIDE_PAD - 24}" y2="${sepY}" stroke="${SEPARATOR_LINE}" stroke-width="2"/>
   <rect x="${SIDE_PAD}" y="${sepY - 10}" width="12" height="14" fill="${SEPARATOR_DOTS}"/>
   <rect x="${W - SIDE_PAD - 12}" y="${sepY - 10}" width="12" height="14" fill="${SEPARATOR_DOTS}"/>
-  <!-- headline -->
-  <text x="${SIDE_PAD}" y="${startY}" font-family="Arial, sans-serif" font-size="56" font-weight="900" fill="${HEADLINE_FILL}" stroke="${HEADLINE_COLOR}" stroke-width="3" text-anchor="start" style="paint-order: stroke fill;">
+  <!-- headline: clean white, no outline -->
+  <text x="${SIDE_PAD + 14}" y="${startY}" font-family="Arial, sans-serif" font-size="56" font-weight="900" fill="${HEADLINE_FILL}" text-anchor="start">
     ${tspans}
   </text>
   <!-- read more -->
   <line x1="${SIDE_PAD}" y1="${readMoreY}" x2="${SIDE_PAD + 100}" y2="${readMoreY}" stroke="${READMORE_COLOR}" stroke-width="5"/>
   <text x="${SIDE_PAD + 116}" y="${readMoreY + 8}" font-family="Arial, sans-serif" font-size="26" font-weight="900" fill="${READMORE_COLOR}">▶▶</text>
-  <!-- Radiant Waves -->
+  <!-- Radiant Waves + tagline (our branding) -->
   <text x="${W - SIDE_PAD}" y="${brandY}" font-family="Arial, sans-serif" font-size="36" font-weight="900" fill="${HEADLINE_FILL}" text-anchor="end">Radiant Waves</text>
+  <text x="${W - SIDE_PAD}" y="${brandY + 22}" font-family="Arial, sans-serif" font-size="14" fill="${HEADLINE_FILL}" text-anchor="end" opacity="0.9">Fresh Naija vibes, daily.</text>
   <line x1="${W - SIDE_PAD - 280}" y1="${lineY}" x2="${W - SIDE_PAD}" y2="${lineY}" stroke="${ACCENT_COLOR}" stroke-width="5"/>
 </svg>`;
 
@@ -240,7 +243,20 @@ async function generateArticleCard(title, articleImageUrl, imageBufferPreloaded 
     .png()
     .toBuffer();
 
-  const composites = [{ input: textBuf, top: TEXT_TOP, left: 0 }];
+  // Corner frame accents (our own look – thin L-shapes, not Sahara)
+  const cornerLen = 40;
+  const cornerStroke = 3;
+  const cornerSvg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${TOTAL_H}" viewBox="0 0 ${W} ${TOTAL_H}">
+  <path d="M ${PAD} ${PAD + cornerLen} V ${PAD} H ${PAD + cornerLen}" fill="none" stroke="${HEADLINE_FILL}" stroke-width="${cornerStroke}"/>
+  <path d="M ${W - PAD - cornerLen} ${PAD} H ${W - PAD} V ${PAD + cornerLen}" fill="none" stroke="${HEADLINE_FILL}" stroke-width="${cornerStroke}"/>
+</svg>`;
+  const cornerBuf = await sharp(Buffer.from(cornerSvg)).png().toBuffer();
+
+  const composites = [
+    { input: cornerBuf, top: 0, left: 0 },
+    { input: textBuf, top: TEXT_TOP, left: 0 },
+  ];
 
   const imgW = W - 2 * SIDE_PAD;
   const imageBuf = imageBufferPreloaded || await fetchArticleImage(articleImageUrl);
