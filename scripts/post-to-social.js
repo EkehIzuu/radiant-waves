@@ -88,6 +88,11 @@ function buildArticleUrl(data, docId) {
   return `${SITE}/news/${slug}/`;
 }
 
+// Radiant Waves card colors (Sahara-style layout, our branding)
+const CARD_BG = "#f47429";
+const HEADLINE_COLOR = "#55a2ce";
+const ACCENT_COLOR = "#55a2ce";
+
 /** Word-wrap into lines of at most maxChars. */
 function wrapLines(text, maxChars = 42) {
   const words = String(text).trim().split(/\s+/);
@@ -105,31 +110,86 @@ function wrapLines(text, maxChars = 42) {
   return lines.slice(0, 5);
 }
 
-/** Generate Sahara-style headline card: bold headline on dark background, Radiant Waves at bottom. */
-async function generateHeadlineImage(title) {
+/** Fetch and prepare article image: resize, white border. Returns buffer or null. */
+async function fetchArticleImage(imageUrl) {
+  if (!imageUrl || typeof imageUrl !== "string") return null;
+  try {
+    const res = await fetch(imageUrl, { signal: AbortSignal.timeout(10000) });
+    if (!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    return await sharp(buf)
+      .resize(1180, 680, { fit: "cover" })
+      .extend({ top: 10, bottom: 10, left: 10, right: 10, background: "#ffffff" })
+      .toBuffer();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Generate card like the reference: article image on top, headline below, Radiant Waves branding.
+ * BG #f47429, headline text #55a2ce, accent line #55a2ce.
+ */
+async function generateArticleCard(title, articleImageUrl) {
   const W = 1200;
-  const H = 800;
-  const safeTitle = escapeXml(stripHtml(title));
+  const IMAGE_H = 700;
+  const TEXT_H = 820;
+  const TOTAL_H = IMAGE_H + TEXT_H;
+
   const lines = wrapLines(title, 38);
-  const lineHeight = 72;
-  const startY = 280;
+  const lineHeight = 58;
+  const startY = 120;
   const tspans = lines
     .map(
       (ln, i) =>
-        `<tspan x="${W / 2}" dy="${i === 0 ? 0 : lineHeight}">${escapeXml(ln)}</tspan>`
+        `<tspan x="60" dy="${i === 0 ? 0 : lineHeight}">${escapeXml(ln.toUpperCase())}</tspan>`
     )
     .join("\n    ");
 
-  const svg = `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
-  <rect width="${W}" height="${H}" fill="#0f172a"/>
-  <text x="${W / 2}" y="${startY}" font-family="Arial, sans-serif" font-size="52" font-weight="700" fill="#ffffff" text-anchor="middle" dominant-baseline="middle">
+  // Orange background
+  const orangeBuf = await sharp({
+    create: {
+      width: W,
+      height: TOTAL_H,
+      channels: 3,
+      background: CARD_BG,
+    },
+  })
+    .png()
+    .toBuffer();
+
+  // Bottom section: separator + headline + "Radiant Waves" + accent line
+  const textSvg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${TEXT_H}" viewBox="0 0 ${W} ${TEXT_H}">
+  <!-- separator line with end markers -->
+  <line x1="80" y1="20" x2="${W - 80}" y2="20" stroke="#e0e0e0" stroke-width="1"/>
+  <rect x="60" y="15" width="8" height="10" fill="#999"/>
+  <rect x="${W - 68}" y="15" width="8" height="10" fill="#999"/>
+  <!-- headline -->
+  <text x="60" y="${startY}" font-family="Arial, sans-serif" font-size="48" font-weight="700" fill="${HEADLINE_COLOR}" text-anchor="start">
     ${tspans}
   </text>
-  <text x="${W / 2}" y="${H - 80}" font-family="Arial, sans-serif" font-size="28" fill="#94a3b8" text-anchor="middle">Radiant Waves</text>
+  <!-- read more hint -->
+  <line x1="60" y1="${TEXT_H - 100}" x2="120" y2="${TEXT_H - 100}" stroke="${HEADLINE_COLOR}" stroke-width="2"/>
+  <text x="140" y="${TEXT_H - 98}" font-family="Arial, sans-serif" font-size="14" fill="${HEADLINE_COLOR}">▶▶</text>
+  <!-- Radiant Waves branding bottom right -->
+  <text x="${W - 40}" y="${TEXT_H - 55}" font-family="Arial, sans-serif" font-size="22" font-weight="600" fill="#ffffff" text-anchor="end">Radiant Waves</text>
+  <line x1="${W - 220}" y1="${TEXT_H - 38}" x2="${W - 40}" y2="${TEXT_H - 38}" stroke="${ACCENT_COLOR}" stroke-width="3"/>
 </svg>`;
 
-  return sharp(Buffer.from(svg))
+  const textBuf = await sharp(Buffer.from(textSvg))
+    .png()
+    .toBuffer();
+
+  const composites = [{ input: textBuf, top: IMAGE_H, left: 0 }];
+
+  const imageBuf = await fetchArticleImage(articleImageUrl);
+  if (imageBuf) {
+    composites.unshift({ input: imageBuf, top: 0, left: 0 });
+  }
+
+  return sharp(orangeBuf)
+    .composite(composites)
     .png()
     .toBuffer();
 }
@@ -225,11 +285,13 @@ async function main() {
   const title = article.data.title || article.data.headline || "Radiant Waves";
   const cleanTitle = stripHtml(title);
   const url = buildArticleUrl(article.data, article.id);
+  const articleImageUrl =
+    article.data.image || article.data.imageUrl || article.data.ogImage || "";
 
   console.log("Posting:", cleanTitle.slice(0, 60) + "...");
   console.log("Link:", url);
 
-  const imageBuffer = await generateHeadlineImage(cleanTitle);
+  const imageBuffer = await generateArticleCard(cleanTitle, articleImageUrl);
 
   try {
     await postToTelegram(cleanTitle, url, { imageBuffer });
