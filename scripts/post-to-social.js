@@ -171,17 +171,20 @@ async function makePlaceholderImage() {
 
 /**
  * Generate card like the reference: article image on top, headline below, Radiant Waves branding.
- * BG #f47429, headline text #55a2ce, accent line #55a2ce.
+ * BG #f47429, headline white + blue outline, accent #55a2ce. Image pushed down ~2rem from top.
  */
 async function generateArticleCard(title, articleImageUrl) {
   const W = 1200;
+  const TOP_PADDING = 32; // ~2rem: image and headline sit lower
   const IMAGE_H = 700;
   const TEXT_H = 820;
-  const TOTAL_H = IMAGE_H + TEXT_H;
+  const TOTAL_H = TOP_PADDING + IMAGE_H + TEXT_H;
+  const IMAGE_TOP = TOP_PADDING;
+  const TEXT_TOP = TOP_PADDING + IMAGE_H;
 
   const lines = wrapLines(title, 38);
-  const lineHeight = 58;
-  const startY = 120;
+  const lineHeight = 62;
+  const startY = 140; // headline a bit lower in text section too
   const tspans = lines
     .map(
       (ln, i) =>
@@ -189,7 +192,7 @@ async function generateArticleCard(title, articleImageUrl) {
     )
     .join("\n    ");
 
-  // Orange background
+  // Orange background (taller to fit top padding)
   const orangeBuf = await sharp({
     create: {
       width: W,
@@ -201,37 +204,37 @@ async function generateArticleCard(title, articleImageUrl) {
     .png()
     .toBuffer();
 
-  // Bottom section: separator + headline (bold + stroke for visibility) + "Radiant Waves" + accent line
+  // Bottom section: separator + headline (white + blue outline) + bolder footer
   const textSvg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${TEXT_H}" viewBox="0 0 ${W} ${TEXT_H}">
   <!-- separator line with end markers -->
-  <line x1="80" y1="20" x2="${W - 80}" y2="20" stroke="#e0e0e0" stroke-width="1"/>
-  <rect x="60" y="15" width="8" height="10" fill="#999"/>
-  <rect x="${W - 68}" y="15" width="8" height="10" fill="#999"/>
-  <!-- headline: extra bold (800), dark stroke so it pops on orange -->
-  <text x="60" y="${startY}" font-family="Arial, sans-serif" font-size="52" font-weight="800" fill="${HEADLINE_COLOR}" stroke="#1a4d6d" stroke-width="2" text-anchor="start" style="paint-order: stroke fill;">
+  <line x1="80" y1="24" x2="${W - 80}" y2="24" stroke="#e0e0e0" stroke-width="1"/>
+  <rect x="60" y="18" width="10" height="12" fill="#999"/>
+  <rect x="${W - 70}" y="18" width="10" height="12" fill="#999"/>
+  <!-- headline: white fill, blue as tiny outline, extra bold -->
+  <text x="60" y="${startY}" font-family="Arial, sans-serif" font-size="54" font-weight="900" fill="#ffffff" stroke="${HEADLINE_COLOR}" stroke-width="1.5" text-anchor="start" style="paint-order: stroke fill;">
     ${tspans}
   </text>
-  <!-- read more hint -->
-  <line x1="60" y1="${TEXT_H - 100}" x2="120" y2="${TEXT_H - 100}" stroke="${HEADLINE_COLOR}" stroke-width="2"/>
-  <text x="140" y="${TEXT_H - 98}" font-family="Arial, sans-serif" font-size="14" font-weight="700" fill="${HEADLINE_COLOR}">▶▶</text>
-  <!-- Radiant Waves branding bottom right -->
-  <text x="${W - 40}" y="${TEXT_H - 55}" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#ffffff" text-anchor="end">Radiant Waves</text>
-  <line x1="${W - 220}" y1="${TEXT_H - 38}" x2="${W - 40}" y2="${TEXT_H - 38}" stroke="${ACCENT_COLOR}" stroke-width="3"/>
+  <!-- read more hint - bolder, bigger -->
+  <line x1="60" y1="${TEXT_H - 100}" x2="140" y2="${TEXT_H - 100}" stroke="#ffffff" stroke-width="4"/>
+  <text x="160" y="${TEXT_H - 95}" font-family="Arial, sans-serif" font-size="22" font-weight="800" fill="#ffffff">▶▶</text>
+  <!-- Radiant Waves branding bottom right - bigger, bolder -->
+  <text x="${W - 40}" y="${TEXT_H - 50}" font-family="Arial, sans-serif" font-size="32" font-weight="800" fill="#ffffff" text-anchor="end">Radiant Waves</text>
+  <line x1="${W - 260}" y1="${TEXT_H - 28}" x2="${W - 40}" y2="${TEXT_H - 28}" stroke="${ACCENT_COLOR}" stroke-width="4"/>
 </svg>`;
 
   const textBuf = await sharp(Buffer.from(textSvg))
     .png()
     .toBuffer();
 
-  const composites = [{ input: textBuf, top: IMAGE_H, left: 0 }];
+  const composites = [{ input: textBuf, top: TEXT_TOP, left: 0 }];
 
   const imageBuf = await fetchArticleImage(articleImageUrl);
   if (imageBuf) {
-    composites.unshift({ input: imageBuf, top: 0, left: 0 });
+    composites.unshift({ input: imageBuf, top: IMAGE_TOP, left: 0 });
   } else {
     const placeholderBuf = await makePlaceholderImage();
-    composites.unshift({ input: placeholderBuf, top: 0, left: 0 });
+    composites.unshift({ input: placeholderBuf, top: IMAGE_TOP, left: 0 });
   }
 
   return sharp(orangeBuf)
