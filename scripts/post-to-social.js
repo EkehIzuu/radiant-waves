@@ -179,16 +179,16 @@ async function makePlaceholderImage() {
  * When you change the preview, copy the same values here (pad, image-h, text-h, font sizes, etc.).
  */
 async function generateArticleCard(title, articleImageUrl, imageBufferPreloaded = null) {
-  // Layout – must match card-preview.html .card
+  // Layout – header at top (Radiant Waves + arrow), then image, then headline
   const W = 1200;
   const PAD = 56;
-  const TOP_PADDING = PAD;
   const SIDE_PAD = PAD;
+  const HEADER_H = 70;
   const IMAGE_H = 660;
-  const TEXT_H = 860;
-  const TOTAL_H = TOP_PADDING + IMAGE_H + TEXT_H;
-  const IMAGE_TOP = TOP_PADDING;
-  const TEXT_TOP = TOP_PADDING + IMAGE_H;
+  const TEXT_H = 846;
+  const TOTAL_H = HEADER_H + IMAGE_H + TEXT_H;
+  const IMAGE_TOP = HEADER_H;
+  const TEXT_TOP = HEADER_H + IMAGE_H;
 
   const lines = wrapLines(title, 28);
   const lineHeight = 72;
@@ -201,9 +201,6 @@ async function generateArticleCard(title, articleImageUrl, imageBufferPreloaded 
     .join("\n    ");
 
   const sepY = 48;
-  const readMoreY = TEXT_H - 160;
-  const brandY = TEXT_H - 88;
-  const lineY = TEXT_H - 52;
 
   // Orange background
   const orangeBuf = await sharp({
@@ -217,33 +214,39 @@ async function generateArticleCard(title, articleImageUrl, imageBufferPreloaded 
     .png()
     .toBuffer();
 
-  // Text section – clean white headline; extra design touches (our own, not Sahara)
+  // Top header: left = read more (line + ▶▶), right = Radiant Waves + tagline + accent line
+  const headerSvg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${HEADER_H}" viewBox="0 0 ${W} ${HEADER_H}">
+  <!-- left: arrow / read more -->
+  <line x1="${SIDE_PAD}" y1="${HEADER_H / 2}" x2="${SIDE_PAD + 80}" y2="${HEADER_H / 2}" stroke="${READMORE_COLOR}" stroke-width="4"/>
+  <text x="${SIDE_PAD + 96}" y="${HEADER_H / 2 + 6}" font-family="Arial, sans-serif" font-size="22" font-weight="900" fill="${READMORE_COLOR}">▶▶</text>
+  <!-- right: Radiant Waves + tagline + line -->
+  <text x="${W - SIDE_PAD}" y="28" font-family="Arial, sans-serif" font-size="28" font-weight="900" fill="${HEADLINE_FILL}" text-anchor="end">Radiant Waves</text>
+  <text x="${W - SIDE_PAD}" y="48" font-family="Arial, sans-serif" font-size="12" fill="${HEADLINE_FILL}" text-anchor="end" opacity="0.9">Fresh Naija vibes, daily.</text>
+  <line x1="${W - SIDE_PAD - 200}" y1="62" x2="${W - SIDE_PAD}" y2="62" stroke="${ACCENT_COLOR}" stroke-width="4"/>
+</svg>`;
+  const headerBuf = await sharp(Buffer.from(headerSvg)).png().toBuffer();
+
+  // Text section – separator + left accent bar + headline only (no brand/arrow at bottom)
   const textSvg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${TEXT_H}" viewBox="0 0 ${W} ${TEXT_H}">
-  <!-- left accent bar (editorial style, our touch) -->
+  <!-- left accent bar -->
   <rect x="${SIDE_PAD}" y="${sepY}" width="5" height="220" fill="${ACCENT_COLOR}" opacity="0.85"/>
   <!-- separator -->
   <line x1="${SIDE_PAD + 24}" y1="${sepY}" x2="${W - SIDE_PAD - 24}" y2="${sepY}" stroke="${SEPARATOR_LINE}" stroke-width="2"/>
   <rect x="${SIDE_PAD}" y="${sepY - 10}" width="12" height="14" fill="${SEPARATOR_DOTS}"/>
   <rect x="${W - SIDE_PAD - 12}" y="${sepY - 10}" width="12" height="14" fill="${SEPARATOR_DOTS}"/>
-  <!-- headline: clean white, no outline -->
+  <!-- headline: clean white -->
   <text x="${SIDE_PAD + 14}" y="${startY}" font-family="Arial, sans-serif" font-size="56" font-weight="900" fill="${HEADLINE_FILL}" text-anchor="start">
     ${tspans}
   </text>
-  <!-- read more -->
-  <line x1="${SIDE_PAD}" y1="${readMoreY}" x2="${SIDE_PAD + 100}" y2="${readMoreY}" stroke="${READMORE_COLOR}" stroke-width="5"/>
-  <text x="${SIDE_PAD + 116}" y="${readMoreY + 8}" font-family="Arial, sans-serif" font-size="26" font-weight="900" fill="${READMORE_COLOR}">▶▶</text>
-  <!-- Radiant Waves + tagline (our branding) -->
-  <text x="${W - SIDE_PAD}" y="${brandY}" font-family="Arial, sans-serif" font-size="36" font-weight="900" fill="${HEADLINE_FILL}" text-anchor="end">Radiant Waves</text>
-  <text x="${W - SIDE_PAD}" y="${brandY + 22}" font-family="Arial, sans-serif" font-size="14" fill="${HEADLINE_FILL}" text-anchor="end" opacity="0.9">Fresh Naija vibes, daily.</text>
-  <line x1="${W - SIDE_PAD - 280}" y1="${lineY}" x2="${W - SIDE_PAD}" y2="${lineY}" stroke="${ACCENT_COLOR}" stroke-width="5"/>
 </svg>`;
 
   const textBuf = await sharp(Buffer.from(textSvg))
     .png()
     .toBuffer();
 
-  // Corner frame accents (our own look – thin L-shapes, not Sahara)
+  // Corner frame accents
   const cornerLen = 40;
   const cornerStroke = 3;
   const cornerSvg = `<?xml version="1.0" encoding="UTF-8"?>
@@ -253,25 +256,18 @@ async function generateArticleCard(title, articleImageUrl, imageBufferPreloaded 
 </svg>`;
   const cornerBuf = await sharp(Buffer.from(cornerSvg)).png().toBuffer();
 
-  const composites = [
-    { input: cornerBuf, top: 0, left: 0 },
-    { input: textBuf, top: TEXT_TOP, left: 0 },
-  ];
-
   const imgW = W - 2 * SIDE_PAD;
   const imageBuf = imageBufferPreloaded || await fetchArticleImage(articleImageUrl);
-  if (imageBuf) {
-    const paddedImg = await sharp(imageBuf)
-      .resize(imgW, IMAGE_H, { fit: "cover" })
-      .toBuffer();
-    composites.unshift({ input: paddedImg, top: IMAGE_TOP, left: SIDE_PAD });
-  } else {
-    const placeholderBuf = await makePlaceholderImage();
-    const paddedPlaceholder = await sharp(placeholderBuf)
-      .resize(imgW, IMAGE_H, { fit: "cover" })
-      .toBuffer();
-    composites.unshift({ input: paddedPlaceholder, top: IMAGE_TOP, left: SIDE_PAD });
-  }
+  const imageForCard = imageBuf
+    ? await sharp(imageBuf).resize(imgW, IMAGE_H, { fit: "cover" }).toBuffer()
+    : await sharp(await makePlaceholderImage()).resize(imgW, IMAGE_H, { fit: "cover" }).toBuffer();
+
+  const composites = [
+    { input: cornerBuf, top: 0, left: 0 },
+    { input: headerBuf, top: 0, left: 0 },
+    { input: imageForCard, top: IMAGE_TOP, left: SIDE_PAD },
+    { input: textBuf, top: TEXT_TOP, left: 0 },
+  ];
 
   return sharp(orangeBuf)
     .composite(composites)
