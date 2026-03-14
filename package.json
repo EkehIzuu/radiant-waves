@@ -1,0 +1,17 @@
+{
+  "name": "radiant-waves",
+  "version": "1.0.0",
+  "description": "Radiant Waves — news ingestor + SEO + social auto-post",
+  "type": "module",
+  "scripts": {
+    "build-seo": "node tools/build-seo-pages.js",
+    "post-to-social": "node scripts/post-to-social.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.0.0",
+    "twitter-api-v2": "^1.17.0"
+  }
+}
