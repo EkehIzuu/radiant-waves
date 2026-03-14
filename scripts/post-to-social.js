@@ -118,13 +118,14 @@ const SEPARATOR_LINE = "#e0e0e0";
 const SEPARATOR_DOTS = "#999";
 const READMORE_COLOR = "#ffffff";
 
-/** Word-wrap into lines of at most maxChars. */
-function wrapLines(text, maxChars = 42) {
+/** Word-wrap into lines of at most maxChars. Keeps words intact so nothing gets cut off (e.g. "TAKE" not "TAKI"). */
+function wrapLines(text, maxChars = 28) {
   const words = String(text).trim().split(/\s+/);
   const lines = [];
   let line = "";
   for (const w of words) {
-    if (line.length + w.length + 1 <= maxChars) {
+    const need = line.length + (line ? 1 : 0) + w.length;
+    if (need <= maxChars) {
       line = line ? line + " " + w : w;
     } else {
       if (line) lines.push(line);
@@ -177,7 +178,7 @@ async function makePlaceholderImage() {
  * Generate card – layout and style match card-preview.html.
  * When you change the preview, copy the same values here (pad, image-h, text-h, font sizes, etc.).
  */
-async function generateArticleCard(title, articleImageUrl) {
+async function generateArticleCard(title, articleImageUrl, imageBufferPreloaded = null) {
   // Layout – must match card-preview.html .card
   const W = 1200;
   const PAD = 56;
@@ -189,8 +190,8 @@ async function generateArticleCard(title, articleImageUrl) {
   const IMAGE_TOP = TOP_PADDING;
   const TEXT_TOP = TOP_PADDING + IMAGE_H;
 
-  const lines = wrapLines(title, 36);
-  const lineHeight = 66;
+  const lines = wrapLines(title, 28);
+  const lineHeight = 72;
   const startY = 120 + PAD;
   const tspans = lines
     .map(
@@ -242,7 +243,7 @@ async function generateArticleCard(title, articleImageUrl) {
   const composites = [{ input: textBuf, top: TEXT_TOP, left: 0 }];
 
   const imgW = W - 2 * SIDE_PAD;
-  const imageBuf = await fetchArticleImage(articleImageUrl);
+  const imageBuf = imageBufferPreloaded || await fetchArticleImage(articleImageUrl);
   if (imageBuf) {
     const paddedImg = await sharp(imageBuf)
       .resize(imgW, IMAGE_H, { fit: "cover" })
@@ -360,16 +361,28 @@ function getArticleImageUrl(article) {
 async function main() {
   const db = await initFirestore();
   let article = await getNextUnpostedArticle(db);
+  let imageBuf = null;
 
   while (article) {
-    if (getArticleImageUrl(article)) break;
-    console.log("Skipping article (no image):", (article.data.title || article.data.headline || "").slice(0, 50) + "...");
-    await article.ref.update({ noImageSkippedAt: admin.firestore.FieldValue.serverTimestamp() });
-    article = await getNextUnpostedArticle(db);
+    const articleImageUrl = getArticleImageUrl(article);
+    if (!articleImageUrl) {
+      console.log("Skipping article (no image URL):", (article.data.title || article.data.headline || "").slice(0, 50) + "...");
+      await article.ref.update({ noImageSkippedAt: admin.firestore.FieldValue.serverTimestamp() });
+      article = await getNextUnpostedArticle(db);
+      continue;
+    }
+    imageBuf = await fetchArticleImage(articleImageUrl);
+    if (!imageBuf) {
+      console.log("Skipping article (image failed to load):", (article.data.title || article.data.headline || "").slice(0, 50) + "...");
+      await article.ref.update({ noImageSkippedAt: admin.firestore.FieldValue.serverTimestamp() });
+      article = await getNextUnpostedArticle(db);
+      continue;
+    }
+    break;
   }
 
   if (!article) {
-    console.log("No unposted article with image found. Nothing to post.");
+    console.log("No unposted article with a working image found. Nothing to post.");
     return;
   }
 
@@ -381,7 +394,7 @@ async function main() {
   console.log("Posting:", cleanTitle.slice(0, 60) + "...");
   console.log("Link:", url);
 
-  const imageBuffer = await generateArticleCard(cleanTitle, articleImageUrl);
+  const imageBuffer = await generateArticleCard(cleanTitle, articleImageUrl, imageBuf);
 
   try {
     await postToTelegram(cleanTitle, url, { imageBuffer });
