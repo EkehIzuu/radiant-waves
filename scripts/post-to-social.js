@@ -65,6 +65,7 @@ async function getNextUnpostedArticle(db) {
   for (const doc of snap.docs) {
     const data = doc.data() || {};
     if (data.postedToTelegramAt) continue;
+    if (data.noImageSkippedAt) continue; // skip articles we already skipped (no image)
     return { id: doc.id, ref: doc.ref, data };
   }
   return null;
@@ -319,19 +320,10 @@ async function postToTwitter(text, link) {
   return tweet;
 }
 
-async function main() {
-  const db = await initFirestore();
-  const article = await getNextUnpostedArticle(db);
-  if (!article) {
-    console.log("No unposted article found. Skipping.");
-    return;
-  }
-
-  const title = article.data.title || article.data.headline || "Radiant Waves";
-  const cleanTitle = stripHtml(title);
-  const url = buildArticleUrl(article.data, article.id);
+/** Get image URL for an article (Firestore first, then built page og:image). */
+function getArticleImageUrl(article) {
   const slug = getArticleSlug(article.data, article.id);
-  let articleImageUrl =
+  let url =
     article.data.image ||
     article.data.imageUrl ||
     article.data.ogImage ||
@@ -339,10 +331,30 @@ async function main() {
     article.data.enclosure?.url ||
     article.data.media?.url ||
     "";
-  if (!articleImageUrl) {
-    articleImageUrl = getImageFromBuiltPage(slug);
-    if (articleImageUrl) console.log("Using image from built page og:image");
+  if (!url) url = getImageFromBuiltPage(slug);
+  return url;
+}
+
+async function main() {
+  const db = await initFirestore();
+  let article = await getNextUnpostedArticle(db);
+
+  while (article) {
+    if (getArticleImageUrl(article)) break;
+    console.log("Skipping article (no image):", (article.data.title || article.data.headline || "").slice(0, 50) + "...");
+    await article.ref.update({ noImageSkippedAt: admin.firestore.FieldValue.serverTimestamp() });
+    article = await getNextUnpostedArticle(db);
   }
+
+  if (!article) {
+    console.log("No unposted article with image found. Nothing to post.");
+    return;
+  }
+
+  const title = article.data.title || article.data.headline || "Radiant Waves";
+  const cleanTitle = stripHtml(title);
+  const url = buildArticleUrl(article.data, article.id);
+  const articleImageUrl = getArticleImageUrl(article);
 
   console.log("Posting:", cleanTitle.slice(0, 60) + "...");
   console.log("Link:", url);
