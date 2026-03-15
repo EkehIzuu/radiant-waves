@@ -1,6 +1,7 @@
 /**
  * Post latest unposted article to Telegram (and optionally Twitter).
- * Sends a Sahara-style headline card image + caption (title + article URL).
+ * Sends a custom card image (dark theme, primary #f47429, secondary #53a4cd)
+ * + caption (title + article URL). Preview design: card-preview.html.
  *
  * Required env: FIREBASE_SERVICE_ACCOUNT_JSON, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
  * Optional env: TWITTER_*, FIRESTORE_COLLECTION, FIRESTORE_ORDER_FIELD
@@ -109,14 +110,12 @@ function getImageFromBuiltPage(slug) {
   }
 }
 
-// Card styling – keep in sync with card-preview.html (edit there, then update here)
-const CARD_BG = "#f47429";
-const HEADLINE_COLOR = "#55a2ce";
-const HEADLINE_FILL = "#ffffff";
-const ACCENT_COLOR = "#55a2ce";
-const SEPARATOR_LINE = "#e0e0e0";
-const SEPARATOR_DOTS = "#999";
-const READMORE_COLOR = "#ffffff";
+// Card styling – primary #f47429, secondary #53a4cd (sync with card-preview.html)
+const CARD_BG = "#0f1114";
+const ACCENT_COLOR = "#f47429";
+const ACCENT_WARM = "#ff9a5c";
+const SECONDARY_COLOR = "#53a4cd";
+const HEADLINE_FILL = "#f0f2f5";
 
 /** Word-wrap into lines of at most maxChars. Keeps words intact so nothing gets cut off (e.g. "TAKE" not "TAKI"). */
 function wrapLines(text, maxChars = 28) {
@@ -150,126 +149,131 @@ async function fetchArticleImage(imageUrl) {
     if (!res.ok) return null;
     const buf = Buffer.from(await res.arrayBuffer());
     if (buf.length < 100) return null;
-    return await sharp(buf)
-      .resize(1180, 680, { fit: "cover" })
-      .extend({ top: 10, bottom: 10, left: 10, right: 10, background: "#ffffff" })
-      .toBuffer();
+    return await sharp(buf).resize(1180, 680, { fit: "cover" }).toBuffer();
   } catch (e) {
     console.warn("Article image fetch failed:", url.slice(0, 50) + "...", e.message);
     return null;
   }
 }
 
-/** Placeholder for image area when article has no image: darker strip + "Radiant Waves". */
+/** Placeholder for image area when article has no image. */
 async function makePlaceholderImage() {
-  const W = 1200;
-  const H = 700;
+  const W = 1104;
+  const H = 560;
   const svg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
-  <rect width="${W}" height="${H}" fill="#e65c1a"/>
-  <rect x="10" y="10" width="${W - 20}" height="${H - 20}" fill="#f47429" stroke="#fff" stroke-width="2" rx="8"/>
-  <text x="${W / 2}" y="${H / 2}" font-family="Arial, sans-serif" font-size="36" font-weight="700" fill="#ffffff" text-anchor="middle" dominant-baseline="middle" opacity="0.9">RADIANT WAVES</text>
-  <text x="${W / 2}" y="${H / 2 + 50}" font-family="Arial, sans-serif" font-size="18" fill="#ffffff" text-anchor="middle" opacity="0.7">Article image unavailable</text>
+  <rect width="${W}" height="${H}" fill="#161a1f" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
+  <text x="${W / 2}" y="${H / 2 - 12}" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#8b929e" text-anchor="middle">No image</text>
+  <text x="${W / 2}" y="${H / 2 + 20}" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#8b929e" text-anchor="middle">for this article</text>
 </svg>`;
   return sharp(Buffer.from(svg)).png().toBuffer();
 }
 
 /**
- * Generate card – layout and style match card-preview.html.
- * When you change the preview, copy the same values here (pad, image-h, text-h, font sizes, etc.).
+ * Generate card – replicates the white mockup: stars, image box, headline, wavy lines, Radiant-Waves.
  */
 async function generateArticleCard(title, articleImageUrl, imageBufferPreloaded = null) {
-  // Layout – header at top (Radiant Waves + arrow), then image, then headline
   const W = 1200;
-  const PAD = 56;
-  const SIDE_PAD = PAD;
-  const HEADER_H = 70;
-  const IMAGE_H = 660;
-  const TEXT_H = 846;
-  const TOTAL_H = HEADER_H + IMAGE_H + TEXT_H;
-  const IMAGE_TOP = HEADER_H;
-  const TEXT_TOP = HEADER_H + IMAGE_H;
+  const PAD = 48;
+  const IMAGE_W = W - 2 * PAD;
+  const IMAGE_H = 560;
+  const IMAGE_TOP = 56;
+  const HEADLINE_TOP = IMAGE_TOP + IMAGE_H + 36;
+  const HEADLINE_LINE_HEIGHT = 50;
+  const WAVE_TOP = 856;
+  const BRAND_TOP = 1012;
+  const BRAND_STRIP_H = 52;
+  const TOTAL_H = 1100;
+  const EDGE = 220;
 
-  const lines = wrapLines(title, 28);
-  const lineHeight = 72;
-  const startY = 120 + PAD;
+  const lines = wrapLines(title, 36);
+  const headlineX = PAD + 20;
   const tspans = lines
     .map(
       (ln, i) =>
-        `<tspan x="${SIDE_PAD}" dy="${i === 0 ? 0 : lineHeight}">${escapeXml(ln.toUpperCase())}</tspan>`
+        `<tspan x="${headlineX}" dy="${i === 0 ? 0 : HEADLINE_LINE_HEIGHT}">${escapeXml(ln)}</tspan>`
     )
     .join("\n    ");
 
-  const sepY = 48;
-
-  // Orange background
-  const orangeBuf = await sharp({
-    create: {
-      width: W,
-      height: TOTAL_H,
-      channels: 3,
-      background: CARD_BG,
-    },
-  })
-    .png()
-    .toBuffer();
-
-  // Top header: left = read more (line + ▶▶), right = Radiant Waves + tagline + accent line
-  const headerSvg = `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${HEADER_H}" viewBox="0 0 ${W} ${HEADER_H}">
-  <!-- left: arrow / read more -->
-  <line x1="${SIDE_PAD}" y1="${HEADER_H / 2}" x2="${SIDE_PAD + 80}" y2="${HEADER_H / 2}" stroke="${READMORE_COLOR}" stroke-width="4"/>
-  <text x="${SIDE_PAD + 96}" y="${HEADER_H / 2 + 6}" font-family="Arial, sans-serif" font-size="22" font-weight="900" fill="${READMORE_COLOR}">▶▶</text>
-  <!-- right: Radiant Waves + tagline + line -->
-  <text x="${W - SIDE_PAD}" y="28" font-family="Arial, sans-serif" font-size="28" font-weight="900" fill="${HEADLINE_FILL}" text-anchor="end">Radiant Waves</text>
-  <text x="${W - SIDE_PAD}" y="48" font-family="Arial, sans-serif" font-size="12" fill="${HEADLINE_FILL}" text-anchor="end" opacity="0.9">Fresh Naija vibes, daily.</text>
-  <line x1="${W - SIDE_PAD - 200}" y1="62" x2="${W - SIDE_PAD}" y2="62" stroke="${ACCENT_COLOR}" stroke-width="4"/>
-</svg>`;
-  const headerBuf = await sharp(Buffer.from(headerSvg)).png().toBuffer();
-
-  // Text section – separator + left accent bar + headline only (no brand/arrow at bottom)
-  const textSvg = `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${TEXT_H}" viewBox="0 0 ${W} ${TEXT_H}">
-  <!-- left accent bar -->
-  <rect x="${SIDE_PAD}" y="${sepY}" width="5" height="220" fill="${ACCENT_COLOR}" opacity="0.85"/>
-  <!-- separator -->
-  <line x1="${SIDE_PAD + 24}" y1="${sepY}" x2="${W - SIDE_PAD - 24}" y2="${sepY}" stroke="${SEPARATOR_LINE}" stroke-width="2"/>
-  <rect x="${SIDE_PAD}" y="${sepY - 10}" width="12" height="14" fill="${SEPARATOR_DOTS}"/>
-  <rect x="${W - SIDE_PAD - 12}" y="${sepY - 10}" width="12" height="14" fill="${SEPARATOR_DOTS}"/>
-  <!-- headline: clean white -->
-  <text x="${SIDE_PAD + 14}" y="${startY}" font-family="Arial, sans-serif" font-size="56" font-weight="900" fill="${HEADLINE_FILL}" text-anchor="start">
-    ${tspans}
-  </text>
-</svg>`;
-
-  const textBuf = await sharp(Buffer.from(textSvg))
-    .png()
-    .toBuffer();
-
-  // Corner frame accents
-  const cornerLen = 40;
-  const cornerStroke = 3;
-  const cornerSvg = `<?xml version="1.0" encoding="UTF-8"?>
+  // Background: dark + left stripe (gradient) + soft orbs
+  const STRIPE_W = 6;
+  const bgSvg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${TOTAL_H}" viewBox="0 0 ${W} ${TOTAL_H}">
-  <path d="M ${PAD} ${PAD + cornerLen} V ${PAD} H ${PAD + cornerLen}" fill="none" stroke="${HEADLINE_FILL}" stroke-width="${cornerStroke}"/>
-  <path d="M ${W - PAD - cornerLen} ${PAD} H ${W - PAD} V ${PAD + cornerLen}" fill="none" stroke="${HEADLINE_FILL}" stroke-width="${cornerStroke}"/>
+  <defs>
+    <linearGradient id="stripeGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:${ACCENT_COLOR}"/>
+      <stop offset="100%" style="stop-color:${ACCENT_WARM}"/>
+    </linearGradient>
+  </defs>
+  <rect width="${W}" height="${TOTAL_H}" fill="${CARD_BG}"/>
+  <rect x="0" y="0" width="${STRIPE_W}" height="${TOTAL_H}" fill="url(#stripeGrad)"/>
+  <circle cx="${W + 100}" cy="-120" r="220" fill="${ACCENT_COLOR}" opacity="0.2"/>
+  <circle cx="-80" cy="${TOTAL_H + 80}" r="180" fill="${SECONDARY_COLOR}" opacity="0.18"/>
 </svg>`;
-  const cornerBuf = await sharp(Buffer.from(cornerSvg)).png().toBuffer();
+  const bgBuf = await sharp(Buffer.from(bgSvg)).png().toBuffer();
 
-  const imgW = W - 2 * SIDE_PAD;
-  const imageBuf = imageBufferPreloaded || await fetchArticleImage(articleImageUrl);
-  const imageForCard = imageBuf
-    ? await sharp(imageBuf).resize(imgW, IMAGE_H, { fit: "cover" }).toBuffer()
-    : await sharp(await makePlaceholderImage()).resize(imgW, IMAGE_H, { fit: "cover" }).toBuffer();
-
-  const composites = [
-    { input: cornerBuf, top: 0, left: 0 },
-    { input: headerBuf, top: 0, left: 0 },
-    { input: imageForCard, top: IMAGE_TOP, left: SIDE_PAD },
-    { input: textBuf, top: TEXT_TOP, left: 0 },
+  const starR = 5;
+  const starPath = (cx, cy, r = starR) => {
+    const points = [];
+    for (let i = 0; i < 5; i++) {
+      const a = (i * 72 - 90) * Math.PI / 180;
+      points.push(`${(cx + r * Math.cos(a)).toFixed(1)},${(cy + r * Math.sin(a)).toFixed(1)}`);
+    }
+    return `M ${points[0]} L ${points[2]} L ${points[4]} L ${points[1]} L ${points[3]} Z`;
+  };
+  const starEl = (x, y, r = starR, fill = ACCENT_COLOR) =>
+    `<path d="${starPath(x, y, r)}" fill="${fill}"/>`;
+  // Top-right: tight arc (lead + 4), eye-catching
+  const starsTr = [
+    starEl(W - 24 - 10, 24 + 10, 7, ACCENT_COLOR),
+    starEl(W - 24 - 32, 24 + 14, 4, ACCENT_COLOR),
+    starEl(W - 24 - 48, 24 + 38, 4, SECONDARY_COLOR),
+    starEl(W - 24 - 38, 24 + 56, 5, ACCENT_COLOR),
+    starEl(W - 24 - 16, 24 + 42, 4, ACCENT_COLOR),
+  ];
+  // Bottom-left: mirror cluster
+  const starsBl = [
+    starEl(PAD + 24 + 58, TOTAL_H - PAD - 24 - 58, 7, ACCENT_COLOR),
+    starEl(PAD + 24 + 36, TOTAL_H - PAD - 24 - 54, 4, ACCENT_COLOR),
+    starEl(PAD + 24 + 20, TOTAL_H - PAD - 24 - 38, 4, SECONDARY_COLOR),
+    starEl(PAD + 24 + 30, TOTAL_H - PAD - 24 - 20, 5, ACCENT_COLOR),
+    starEl(PAD + 24 + 52, TOTAL_H - PAD - 24 - 34, 4, ACCENT_COLOR),
   ];
 
-  return sharp(orangeBuf)
+  const lineLen = 500;
+  const lineLeft = (W - lineLen) / 2;
+  const lineY1 = WAVE_TOP + 4;
+  const lineY2 = WAVE_TOP + 11;
+  const lineY3 = WAVE_TOP + 18;
+  const decoSvg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${TOTAL_H}" viewBox="0 0 ${W} ${TOTAL_H}">
+  <text x="${PAD + STRIPE_W + 16}" y="38" font-family="Arial, sans-serif" font-size="11" font-weight="700" fill="${ACCENT_COLOR}" text-anchor="start">NEWS</text>
+  <rect x="${PAD}" y="${IMAGE_TOP}" width="${IMAGE_W}" height="${IMAGE_H}" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
+  ${starsTr.join("\n  ")}
+  ${starsBl.join("\n  ")}
+  <line x1="${PAD}" y1="${HEADLINE_TOP + 20}" x2="${PAD}" y2="${HEADLINE_TOP + 120}" stroke="${ACCENT_COLOR}" stroke-width="4"/>
+  <text x="${headlineX}" y="${HEADLINE_TOP + 30}" font-family="Arial, sans-serif" font-size="44" font-weight="800" fill="${HEADLINE_FILL}" text-anchor="start">
+    ${tspans}
+  </text>
+  <line x1="${lineLeft}" y1="${lineY1}" x2="${lineLeft + lineLen}" y2="${lineY1}" stroke="${ACCENT_COLOR}" stroke-width="2" opacity="0.9"/>
+  <line x1="${lineLeft}" y1="${lineY2}" x2="${lineLeft + lineLen}" y2="${lineY2}" stroke="${SECONDARY_COLOR}" stroke-width="1.5" opacity="0.9"/>
+  <line x1="${lineLeft}" y1="${lineY3}" x2="${lineLeft + lineLen}" y2="${lineY3}" stroke="${ACCENT_COLOR}" stroke-width="2" opacity="0.9"/>
+  <text x="${W / 2}" y="${BRAND_TOP + 6}" font-family="Arial, sans-serif" font-size="20" font-weight="600" fill="${HEADLINE_FILL}" text-anchor="middle">RADIANT WAVES</text>
+  <line x1="${W / 2 - 30}" y1="${BRAND_TOP + 22}" x2="${W / 2 + 30}" y2="${BRAND_TOP + 22}" stroke="${SECONDARY_COLOR}" stroke-width="1" opacity="0.9"/>
+</svg>`;
+  const decoBuf = await sharp(Buffer.from(decoSvg)).png().toBuffer();
+
+  const imageBuf = imageBufferPreloaded || await fetchArticleImage(articleImageUrl);
+  const imageForCard = imageBuf
+    ? await sharp(imageBuf).resize(IMAGE_W, IMAGE_H, { fit: "cover" }).toBuffer()
+    : await makePlaceholderImage();
+
+  const composites = [
+    { input: imageForCard, top: IMAGE_TOP, left: PAD },
+    { input: decoBuf, top: 0, left: 0 },
+  ];
+
+  return sharp(bgBuf)
     .composite(composites)
     .png()
     .toBuffer();
