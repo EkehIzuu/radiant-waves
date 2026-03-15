@@ -158,7 +158,7 @@ async function fetchArticleImage(imageUrl) {
 
 /** Placeholder for image area when article has no image. */
 async function makePlaceholderImage() {
-  const W = 1104;
+  const W = 900;
   const H = 560;
   const svg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
@@ -170,23 +170,25 @@ async function makePlaceholderImage() {
 }
 
 /**
- * Generate card – replicates the white mockup: stars, image box, headline, wavy lines, Radiant-Waves.
+ * Generate card – layout/colors match card-preview.html (see CARD-DESIGN.md).
  */
 async function generateArticleCard(title, articleImageUrl, imageBufferPreloaded = null) {
-  const W = 1200;
+  const W = 1000;
+  const TOTAL_H = 1500;
   const PAD = 48;
-  const IMAGE_W = W - 2 * PAD;
+  const IMAGE_W = 900;
   const IMAGE_H = 560;
-  const IMAGE_TOP = 56;
-  const HEADLINE_TOP = IMAGE_TOP + IMAGE_H + 36;
-  const HEADLINE_LINE_HEIGHT = 50;
-  const WAVE_TOP = 856;
-  const BRAND_TOP = 1012;
-  const BRAND_STRIP_H = 52;
-  const TOTAL_H = 1100;
-  const EDGE = 220;
+  const IMAGE_LEFT = (W - IMAGE_W) / 2;
+  const IMAGE_TOP = 100;
+  const HEADLINE_GAP = 100;
+  const HEADLINE_TOP = IMAGE_TOP + IMAGE_H + HEADLINE_GAP;
+  const HEADLINE_LINE_HEIGHT = 72;
+  const LINES_TOP = 1200;
+  const LINE_LEN = 700;
+  const LINE_LEFT = (W - LINE_LEN) / 2;
+  const BRAND_TOP = 1380;
 
-  const lines = wrapLines(title, 36);
+  const lines = wrapLines(title, 28);
   const headlineX = PAD + 20;
   const tspans = lines
     .map(
@@ -240,26 +242,24 @@ async function generateArticleCard(title, articleImageUrl, imageBufferPreloaded 
     starEl(PAD + 24 + 52, TOTAL_H - PAD - 24 - 34, 4, ACCENT_COLOR),
   ];
 
-  const lineLen = 500;
-  const lineLeft = (W - lineLen) / 2;
-  const lineY1 = WAVE_TOP + 4;
-  const lineY2 = WAVE_TOP + 11;
-  const lineY3 = WAVE_TOP + 18;
+  const lineY1 = LINES_TOP + 5;
+  const lineY2 = LINES_TOP + 20;
+  const lineY3 = LINES_TOP + 35;
   const decoSvg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${TOTAL_H}" viewBox="0 0 ${W} ${TOTAL_H}">
-  <text x="${PAD + STRIPE_W + 16}" y="38" font-family="Arial, sans-serif" font-size="11" font-weight="700" fill="${ACCENT_COLOR}" text-anchor="start">NEWS</text>
-  <rect x="${PAD}" y="${IMAGE_TOP}" width="${IMAGE_W}" height="${IMAGE_H}" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
+  <text x="${PAD + STRIPE_W + 16}" y="65" font-family="Arial, sans-serif" font-size="45" font-weight="650" fill="${ACCENT_COLOR}" text-anchor="start">NEWS</text>
+  <rect x="${IMAGE_LEFT}" y="${IMAGE_TOP}" width="${IMAGE_W}" height="${IMAGE_H}" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
   ${starsTr.join("\n  ")}
   ${starsBl.join("\n  ")}
-  <line x1="${PAD}" y1="${HEADLINE_TOP + 20}" x2="${PAD}" y2="${HEADLINE_TOP + 120}" stroke="${ACCENT_COLOR}" stroke-width="4"/>
-  <text x="${headlineX}" y="${HEADLINE_TOP + 30}" font-family="Arial, sans-serif" font-size="44" font-weight="800" fill="${HEADLINE_FILL}" text-anchor="start">
+  <line x1="${PAD}" y1="${HEADLINE_TOP + 24}" x2="${PAD}" y2="${HEADLINE_TOP + 140}" stroke="${ACCENT_COLOR}" stroke-width="4"/>
+  <text x="${headlineX}" y="${HEADLINE_TOP + 42}" font-family="Arial, sans-serif" font-size="60" font-weight="800" fill="${HEADLINE_FILL}" text-anchor="start">
     ${tspans}
   </text>
-  <line x1="${lineLeft}" y1="${lineY1}" x2="${lineLeft + lineLen}" y2="${lineY1}" stroke="${ACCENT_COLOR}" stroke-width="2" opacity="0.9"/>
-  <line x1="${lineLeft}" y1="${lineY2}" x2="${lineLeft + lineLen}" y2="${lineY2}" stroke="${SECONDARY_COLOR}" stroke-width="1.5" opacity="0.9"/>
-  <line x1="${lineLeft}" y1="${lineY3}" x2="${lineLeft + lineLen}" y2="${lineY3}" stroke="${ACCENT_COLOR}" stroke-width="2" opacity="0.9"/>
-  <text x="${W / 2}" y="${BRAND_TOP + 6}" font-family="Arial, sans-serif" font-size="20" font-weight="600" fill="${HEADLINE_FILL}" text-anchor="middle">RADIANT WAVES</text>
-  <line x1="${W / 2 - 30}" y1="${BRAND_TOP + 22}" x2="${W / 2 + 30}" y2="${BRAND_TOP + 22}" stroke="${SECONDARY_COLOR}" stroke-width="1" opacity="0.9"/>
+  <line x1="${LINE_LEFT}" y1="${lineY1}" x2="${LINE_LEFT + LINE_LEN}" y2="${lineY1}" stroke="${ACCENT_COLOR}" stroke-width="7" opacity="0.9"/>
+  <line x1="${LINE_LEFT}" y1="${lineY2}" x2="${LINE_LEFT + LINE_LEN}" y2="${lineY2}" stroke="${SECONDARY_COLOR}" stroke-width="5.5" opacity="0.9"/>
+  <line x1="${LINE_LEFT}" y1="${lineY3}" x2="${LINE_LEFT + LINE_LEN}" y2="${lineY3}" stroke="${ACCENT_COLOR}" stroke-width="7" opacity="0.9"/>
+  <text x="${W / 2}" y="${BRAND_TOP + 14}" font-family="Arial, sans-serif" font-size="40" font-weight="600" fill="${HEADLINE_FILL}" text-anchor="middle">RADIANT WAVES</text>
+  <line x1="${W / 2 - 150}" y1="${BRAND_TOP + 54}" x2="${W / 2 + 150}" y2="${BRAND_TOP + 54}" stroke="${SECONDARY_COLOR}" stroke-width="7" opacity="0.9"/>
 </svg>`;
   const decoBuf = await sharp(Buffer.from(decoSvg)).png().toBuffer();
 
@@ -269,7 +269,7 @@ async function generateArticleCard(title, articleImageUrl, imageBufferPreloaded 
     : await makePlaceholderImage();
 
   const composites = [
-    { input: imageForCard, top: IMAGE_TOP, left: PAD },
+    { input: imageForCard, top: IMAGE_TOP, left: IMAGE_LEFT },
     { input: decoBuf, top: 0, left: 0 },
   ];
 
@@ -438,6 +438,13 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error(err);
+  const msg = err?.message || String(err);
+  const code = err?.code ?? err?.details;
+  if (err?.code === 8 || msg.includes("RESOURCE_EXHAUSTED") || msg.includes("Quota exceeded")) {
+    console.error("Firestore quota exceeded. Check Firebase Console → Usage and billing.");
+    console.error("See DEPLOY.md for options (upgrade plan or reduce read/write usage).");
+  } else {
+    console.error(err);
+  }
   process.exit(1);
 });
