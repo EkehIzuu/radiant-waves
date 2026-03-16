@@ -1,10 +1,11 @@
 /**
- * Post latest unposted article to Telegram (and optionally Twitter).
+ * Post latest unposted article to Telegram, optional Instagram (via Page token), optional X (Twitter).
  * Sends a custom card image (dark theme, primary #f47429, secondary #53a4cd)
  * + caption (title + article URL). Preview design: card-preview.html.
  *
  * Required env: FIREBASE_SERVICE_ACCOUNT_JSON, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
- * Optional env: TWITTER_*, FIRESTORE_COLLECTION, FIRESTORE_ORDER_FIELD
+ * Optional env: FB_PAGE_ACCESS_TOKEN, FIREBASE_STORAGE_BUCKET (for IG), TWITTER_*, FIRESTORE_*
+ * When FB_PAGE_ACCESS_TOKEN + FIREBASE_STORAGE_BUCKET are set, uploads card to Storage and posts to IG (linked to your Page; IG posts can sync to Facebook).
  */
 
 import admin from "firebase-admin";
@@ -47,13 +48,29 @@ function escapeXml(s) {
     .replace(/'/g, "&apos;");
 }
 
-async function initFirestore() {
+async function initFirebase() {
   const raw = mustEnv("FIREBASE_SERVICE_ACCOUNT_JSON");
   const cred = typeof raw === "string" ? JSON.parse(raw) : raw;
   if (!admin.apps.length) {
-    admin.initializeApp({ credential: admin.credential.cert(cred) });
+    const storageBucket = process.env.FIREBASE_STORAGE_BUCKET || (cred.project_id && `${cred.project_id}.appspot.com`);
+    admin.initializeApp({
+      credential: admin.credential.cert(cred),
+      ...(storageBucket && { storageBucket }),
+    });
   }
   return admin.firestore();
+}
+
+/** Upload card image to Firebase Storage and return a signed URL (for Instagram). */
+async function uploadCardToStorage(buffer, fileName) {
+  const bucket = admin.storage().bucket();
+  const file = bucket.file("social-cards/" + fileName);
+  await file.save(buffer, { metadata: { contentType: "image/png" } });
+  const [url] = await file.getSignedUrl({
+    action: "read",
+    expires: Date.now() + 2 * 60 * 60 * 1000, // 2 hours (IG fetches soon after)
+  });
+  return url;
 }
 
 async function getNextUnpostedArticle(db) {
@@ -106,6 +123,29 @@ function getImageFromBuiltPage(slug) {
     const match = html.match(/<meta\s+property="og:image"\s+content="([^"]+)"/i);
     return match ? match[1].replace(/&amp;/g, "&") : "";
   } catch {
+    return "";
+  }
+}
+
+/** Fetch article page HTML and extract og:image URL. Fallback when Firestore and built page have no image. */
+async function fetchOgImageFromUrl(pageUrl) {
+  if (!pageUrl || typeof pageUrl !== "string") return "";
+  const url = pageUrl.trim();
+  if (!url.startsWith("http")) return "";
+  try {
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(12000),
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; RadiantWaves/1.0; +https://radiant-waves.com.ng)" },
+      redirect: "follow",
+    });
+    if (!res.ok) return "";
+    const html = await res.text();
+    const match = html.match(/<meta\s+[^>]*property\s*=\s*["']og:image["'][^>]*content\s*=\s*["']([^"']+)["']/i)
+      || html.match(/<meta\s+[^>]*content\s*=\s*["']([^"']+)["'][^>]*property\s*=\s*["']og:image["']/i);
+    const found = match ? match[1].trim().replace(/&amp;/g, "&") : "";
+    return found && found.startsWith("http") ? found : "";
+  } catch (e) {
+    console.warn("og:image fetch failed for", url.slice(0, 50) + "...", e.message);
     return "";
   }
 }
@@ -336,7 +376,84 @@ async function postToTelegram(caption, link, options = {}) {
   return body;
 }
 
-async function postToTwitter(text, link) {
+/** Post to Facebook Page: card image + caption + link. Uses same FB_PAGE_ACCESS_TOKEN (no Storage needed). */
+async function postToFacebook(caption, link, options = {}) {
+  const token = process.env.FB_PAGE_ACCESS_TOKEN;
+  const pageId = process.env.FB_PAGE_ID || "me";
+  if (!token) return null;
+
+  const message = link ? `${stripHtml(caption)}\n\n${link}` : stripHtml(caption);
+
+  if (options.imageBuffer && Buffer.isBuffer(options.imageBuffer) && options.imageBuffer.length > 0) {
+    const form = new FormData();
+    form.append("message", message);
+    form.append("source", new Blob([options.imageBuffer], { type: "image/png" }), "card.png");
+    form.append("access_token", token);
+    const res = await fetch(`https://graph.facebook.com/v18.0/${pageId}/photos`, {
+      method: "POST",
+      body: form,
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error.message || `Facebook API: ${res.status}`);
+    return data;
+  }
+
+  const params = new URLSearchParams({ message, access_token: token });
+  const res = await fetch(`https://graph.facebook.com/v18.0/${pageId}/feed`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: params,
+  });
+  const data = await res.json();
+  if (data.error) throw new Error(data.error.message || `Facebook API: ${res.status}`);
+  return data;
+}
+
+/** Post to Instagram (Business) via Graph API. Needs imageUrl (public or signed). Uses FB Page token; IG account must be linked to the Page. */
+async function postToInstagram(caption, link, options = {}) {
+  const token = process.env.FB_PAGE_ACCESS_TOKEN;
+  if (!token || !options.imageUrl) return null;
+
+  const captionText = link ? `${stripHtml(caption)}\n\n${link}` : stripHtml(caption);
+  const graph = "https://graph.facebook.com/v18.0";
+
+  // Resolve "me" to get the Instagram Business Account ID linked to the Page
+  const meRes = await fetch(`${graph}/me?fields=instagram_business_account&access_token=${encodeURIComponent(token)}`);
+  const meData = await meRes.json();
+  if (meData.error) throw new Error(meData.error.message || "Facebook Graph: me");
+  const igUserId = meData.instagram_business_account?.id;
+  if (!igUserId) throw new Error("No Instagram Business account linked to this Page. Connect IG in Page settings.");
+
+  // 1) Create media container (image_url + caption)
+  const createParams = new URLSearchParams({
+    image_url: options.imageUrl,
+    caption: captionText.slice(0, 2200),
+    access_token: token,
+  });
+  const createRes = await fetch(`${graph}/${igUserId}/media`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: createParams,
+  });
+  const createData = await createRes.json();
+  if (createData.error) throw new Error(createData.error.message || "Instagram media create failed");
+  const creationId = createData.id;
+  if (!creationId) throw new Error("No creation_id from Instagram");
+
+  // 2) Publish the container
+  const pubParams = new URLSearchParams({ creation_id: creationId, access_token: token });
+  const pubRes = await fetch(`${graph}/${igUserId}/media_publish`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: pubParams,
+  });
+  const pubData = await pubRes.json();
+  if (pubData.error) throw new Error(pubData.error.message || "Instagram publish failed");
+  return pubData; // { id: media id }
+}
+
+/** Post to X (Twitter): optional card image + text + link. Tweet text kept within 280 chars. */
+async function postToTwitter(text, link, options = {}) {
   const apiKey = process.env.TWITTER_API_KEY;
   const apiSecret = process.env.TWITTER_API_SECRET;
   const accessToken = process.env.TWITTER_ACCESS_TOKEN;
@@ -354,12 +471,29 @@ async function postToTwitter(text, link) {
     accessSecret,
   });
 
-  const tweetText = link ? `${stripHtml(text)}\n\n${link}` : stripHtml(text);
-  const tweet = await client.v2.tweet(tweetText);
+  let tweetText = link ? `${stripHtml(text)}\n\n${link}` : stripHtml(text);
+  const maxLen = 280;
+  if (tweetText.length > maxLen) {
+    const linkPart = link ? `\n\n${link}` : "";
+    const headRoom = maxLen - linkPart.length - 3; // "…" at end
+    tweetText = stripHtml(text).slice(0, Math.max(0, headRoom)).trim() + "…" + linkPart;
+    if (tweetText.length > maxLen) tweetText = tweetText.slice(0, maxLen);
+  }
+
+  const payload = { text: tweetText };
+
+  if (options.imageBuffer && Buffer.isBuffer(options.imageBuffer) && options.imageBuffer.length > 0) {
+    const mediaId = await client.v2.uploadMedia(options.imageBuffer, {
+      media_type: "image/png",
+    });
+    payload.media = { media_ids: [mediaId] };
+  }
+
+  const tweet = await client.v2.tweet(payload);
   return tweet;
 }
 
-/** Get image URL for an article (Firestore first, then built page og:image). */
+/** Get image URL for an article (Firestore first, then built page og:image). Sync only. */
 function getArticleImageUrl(article) {
   const slug = getArticleSlug(article.data, article.id);
   let url =
@@ -374,13 +508,31 @@ function getArticleImageUrl(article) {
   return url;
 }
 
+/** Article source URL for fetching og:image when stored image is missing. */
+function getArticleSourceUrl(data) {
+  const u = data.canonicalUrl || data.pageUrl || data.url || data.link || "";
+  return typeof u === "string" ? u.trim() : "";
+}
+
 async function main() {
-  const db = await initFirestore();
+  const db = await initFirebase();
   let article = await getNextUnpostedArticle(db);
   let imageBuf = null;
 
   while (article) {
-    const articleImageUrl = getArticleImageUrl(article);
+    let articleImageUrl = getArticleImageUrl(article);
+    if (!articleImageUrl) {
+      const sourceUrl = getArticleSourceUrl(article.data);
+      if (sourceUrl) {
+        articleImageUrl = await fetchOgImageFromUrl(sourceUrl);
+        if (articleImageUrl) {
+          article.data.imageUrl = article.data.image = articleImageUrl;
+          try {
+            await article.ref.update({ imageUrl: articleImageUrl, image: articleImageUrl });
+          } catch (_) {}
+        }
+      }
+    }
     if (!articleImageUrl) {
       console.log("Skipping article (no image URL):", (article.data.title || article.data.headline || "").slice(0, 50) + "...");
       await article.ref.update({ noImageSkippedAt: admin.firestore.FieldValue.serverTimestamp() });
@@ -420,18 +572,59 @@ async function main() {
     throw e;
   }
 
+  let facebooked = false;
+  if (process.env.FB_PAGE_ACCESS_TOKEN) {
+    try {
+      const fb = await postToFacebook(cleanTitle, url, { imageBuffer });
+      if (fb) {
+        console.log("Posted to Facebook (with headline card).");
+        if (fb.id) console.log("View post: https://www.facebook.com/photo/?fbid=" + fb.id);
+        facebooked = true;
+      }
+    } catch (e) {
+      console.error("Facebook error:", e?.message || e);
+    }
+  }
+
+  let instagrammed = false;
+  if (process.env.FB_PAGE_ACCESS_TOKEN && process.env.FIREBASE_STORAGE_BUCKET) {
+    try {
+      const cardUrl = await uploadCardToStorage(imageBuffer, `${article.id}.png`);
+      const ig = await postToInstagram(cleanTitle, url, { imageUrl: cardUrl });
+      if (ig) {
+        console.log("Posted to Instagram (with headline card).");
+        if (ig.id) console.log("Media id:", ig.id);
+        instagrammed = true;
+      }
+    } catch (e) {
+      console.error("Instagram error:", e?.message || e);
+    }
+  }
+
   let tweeted = false;
   try {
-    const tw = await postToTwitter(cleanTitle, url);
-    if (tw) {
-      console.log("Posted to Twitter.");
+    const tw = await postToTwitter(cleanTitle, url, { imageBuffer });
+    if (tw && tw.data && tw.data.id) {
+      const tweetId = tw.data.id;
+      console.log("Posted to X (Twitter) with card image.");
+      console.log("View tweet: https://x.com/i/status/" + tweetId);
+      tweeted = true;
+    } else if (tw) {
+      console.log("Posted to X (Twitter) with card image.");
       tweeted = true;
     }
   } catch (e) {
-    console.warn("Twitter skip or error:", e.message);
+    const msg = e?.message || String(e);
+    if (msg.includes("402") || msg.includes("Payment Required")) {
+      console.error("X/Twitter 402 Payment Required: posting via API needs a paid plan or credits. See developer.x.com → your project → Subscription.");
+    } else {
+      console.error("X/Twitter error:", msg);
+    }
   }
 
   const update = { postedToTelegramAt: admin.firestore.FieldValue.serverTimestamp() };
+  if (facebooked) update.postedToFacebookAt = admin.firestore.FieldValue.serverTimestamp();
+  if (instagrammed) update.postedToInstagramAt = admin.firestore.FieldValue.serverTimestamp();
   if (tweeted) update.postedToTwitterAt = admin.firestore.FieldValue.serverTimestamp();
   await article.ref.update(update);
   console.log("Marked article as posted.");
