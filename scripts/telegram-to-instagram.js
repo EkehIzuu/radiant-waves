@@ -12,43 +12,71 @@
  * we upload the image to imgbb and use that URL instead.
  */
 
+import fs from "fs";
+import path from "path";
+
 const TELEGRAM_API = "https://api.telegram.org/bot";
+const STATE_PATH = path.join(process.cwd(), "state.json");
 
 function stripHtml(str) {
   if (typeof str !== "string") return "";
   return str.replace(/<[^>]*>/g, "").trim();
 }
 
-/** Get recent updates from Telegram, find latest message with photo in our channel. */
-async function getLatestChannelPhoto(botToken, chatId) {
+function readState() {
+  try {
+    const raw = fs.readFileSync(STATE_PATH, "utf8");
+    const data = JSON.parse(raw);
+    const n = Number(data?.last_update_id || 0);
+    return Number.isFinite(n) ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function writeState(lastUpdateId) {
+  const n = Number(lastUpdateId || 0);
+  fs.writeFileSync(STATE_PATH, JSON.stringify({ last_update_id: n }, null, 2) + "\n", "utf8");
+}
+
+/** Get updates since last_update_id, find latest channel photo post + return its update_id. */
+async function getLatestChannelPhoto(botToken, chatId, afterUpdateId) {
   // If a webhook is set, getUpdates will fail with a conflict error.
   // In CI we always want polling, so clear any webhook.
   try {
     await fetch(`${TELEGRAM_API}${botToken}/deleteWebhook?drop_pending_updates=false`);
   } catch (_) {}
 
-  const res = await fetch(
-    `${TELEGRAM_API}${botToken}/getUpdates?limit=100&allowed_updates=${encodeURIComponent("message,channel_post,edited_channel_post")}`,
-  );
+  const params = new URLSearchParams({
+    limit: "100",
+    allowed_updates: "message,channel_post,edited_channel_post",
+  });
+  if (afterUpdateId && Number(afterUpdateId) > 0) {
+    params.set("offset", String(Number(afterUpdateId) + 1));
+  }
+
+  const res = await fetch(`${TELEGRAM_API}${botToken}/getUpdates?` + params.toString());
   const data = await res.json();
   if (!data.ok) throw new Error(data.description || "Telegram getUpdates failed");
 
   const updates = data.result || [];
   console.log("getUpdates returned", updates.length, "updates");
+  const maxUpdateId = updates.reduce((m, u) => Math.max(m, Number(u?.update_id || 0)), 0);
+
   const pick = (u) => u?.channel_post || u?.message || u?.edited_channel_post || null;
   const withPhoto = updates
-    .map((u) => pick(u))
-    .filter((m) => m && String(m.chat?.id) === String(chatId) && m.photo?.length)
-    .sort((a, b) => (b.date || 0) - (a.date || 0));
+    .map((u) => ({ update_id: u.update_id, msg: pick(u) }))
+    .filter((x) => x.msg && String(x.msg.chat?.id) === String(chatId) && x.msg.photo?.length)
+    .sort((a, b) => (b.msg.date || 0) - (a.msg.date || 0));
 
   console.log("Updates from our channel with photo:", withPhoto.length);
   const latest = withPhoto[0];
-  if (!latest?.photo?.length) return null;
+  if (!latest?.msg?.photo?.length) return { item: null, maxUpdateId };
 
-  const photoSizes = latest.photo;
+  const photoSizes = latest.msg.photo;
   const largest = photoSizes[photoSizes.length - 1];
   const fileId = largest.file_id;
-  const caption = latest.caption || "";
+  const caption = latest.msg.caption || "";
 
   const fileRes = await fetch(`${TELEGRAM_API}${botToken}/getFile?file_id=${encodeURIComponent(fileId)}`);
   const fileData = await fileRes.json();
@@ -58,7 +86,7 @@ async function getLatestChannelPhoto(botToken, chatId) {
   if (!filePath) throw new Error("No file_path from getFile");
 
   const imageUrl = `https://api.telegram.org/file/bot${botToken}/${filePath}`;
-  return { imageUrl, caption };
+  return { item: { imageUrl, caption, update_id: latest.update_id }, maxUpdateId };
 }
 
 /** If IMGBB_API_KEY is set, upload buffer to imgbb and return the direct image URL. */
@@ -127,17 +155,17 @@ async function main() {
     process.exit(1);
   }
 
-  // Give Telegram a moment to deliver the channel_post from the previous step.
-  console.log("Waiting 3s for Telegram to register the channel post...");
-  await new Promise((r) => setTimeout(r, 3000));
+  const lastUpdateId = readState();
+  console.log("State last_update_id:", lastUpdateId);
 
-  console.log("Fetching latest photo from Telegram channel (chat_id=" + chatId + ")...");
-  const latest = await getLatestChannelPhoto(botToken, chatId);
+  console.log("Fetching Telegram updates for chat_id=" + chatId + "...");
+  const { item: latest, maxUpdateId } = await getLatestChannelPhoto(botToken, chatId, lastUpdateId);
   if (!latest) {
-    console.log("No recent photo post found in the channel. Ensure the bot posts to the channel and that we're reading channel_post.");
+    console.log("No NEW photo post found since last_update_id. Updating state to:", maxUpdateId);
+    if (maxUpdateId && maxUpdateId > lastUpdateId) writeState(maxUpdateId);
     return;
   }
-  console.log("Found latest post, caption length:", (latest.caption || "").length);
+  console.log("Found latest NEW post (update_id=" + latest.update_id + "), caption length:", (latest.caption || "").length);
 
   let imageUrl = latest.imageUrl;
   const imgbbKey = process.env.IMGBB_API_KEY;
@@ -165,6 +193,12 @@ async function main() {
     console.log("Posted to Instagram. Media id:", ig.id);
   } else {
     console.log("Instagram post completed.");
+  }
+
+  // Mark processed so we don't repost.
+  if (latest.update_id) {
+    console.log("Updating state last_update_id →", latest.update_id);
+    writeState(latest.update_id);
   }
 }
 
