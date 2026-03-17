@@ -573,7 +573,9 @@ async function main() {
   }
 
   let facebooked = false;
-  if (process.env.FB_PAGE_ACCESS_TOKEN) {
+  // If you're using "post to IG then auto-share to Facebook" (Business Suite),
+  // leave direct Facebook posting OFF to avoid duplicates.
+  if (process.env.POST_TO_FACEBOOK === "1" && process.env.FB_PAGE_ACCESS_TOKEN) {
     try {
       const fb = await postToFacebook(cleanTitle, url, { imageBuffer });
       if (fb) {
@@ -599,6 +601,9 @@ async function main() {
     } catch (e) {
       console.error("Instagram error:", e?.message || e);
     }
+  }
+  if (process.env.FB_PAGE_ACCESS_TOKEN && !process.env.FIREBASE_STORAGE_BUCKET) {
+    console.log("Instagram (Storage) skipped: FIREBASE_STORAGE_BUCKET not set. If enabled, IG runs via the Telegram → Instagram workflow step.");
   }
 
   let tweeted = false;
