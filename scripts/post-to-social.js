@@ -73,6 +73,29 @@ async function uploadCardToStorage(buffer, fileName) {
   return url;
 }
 
+async function uploadToImgbb(imageBuffer, apiKey) {
+  if (!apiKey || !imageBuffer?.length) return "";
+  const form = new FormData();
+  form.append("key", apiKey);
+  form.append("image", new Blob([imageBuffer], { type: "image/png" }), "image.png");
+  const res = await fetch("https://api.imgbb.com/1/upload", { method: "POST", body: form });
+  const data = await res.json();
+  const url = data?.data?.image?.url ?? data?.data?.url;
+  return url && url.startsWith("http") ? url : "";
+}
+
+async function getTelegramFileUrlFromSendPhoto(botToken, sendPhotoBody) {
+  const fileId = sendPhotoBody?.result?.photo?.at?.(-1)?.file_id;
+  if (!fileId) return "";
+  const apiBase = `https://api.telegram.org/bot${botToken}`;
+  const fileRes = await fetch(`${apiBase}/getFile?file_id=${encodeURIComponent(fileId)}`);
+  const fileData = await fileRes.json();
+  if (!fileData.ok) return "";
+  const filePath = fileData.result?.file_path;
+  if (!filePath) return "";
+  return `https://api.telegram.org/file/bot${botToken}/${filePath}`;
+}
+
 async function getNextUnpostedArticle(db) {
   const snap = await db
     .collection(COLLECTION)
@@ -564,8 +587,9 @@ async function main() {
 
   const imageBuffer = await generateArticleCard(cleanTitle, articleImageUrl, imageBuf);
 
+  let tg = null;
   try {
-    await postToTelegram(cleanTitle, url, { imageBuffer });
+    tg = await postToTelegram(cleanTitle, url, { imageBuffer });
     console.log("Posted to Telegram (with headline card).");
   } catch (e) {
     console.error("Telegram error:", e.message);
@@ -589,21 +613,49 @@ async function main() {
   }
 
   let instagrammed = false;
-  if (process.env.FB_PAGE_ACCESS_TOKEN && process.env.FIREBASE_STORAGE_BUCKET) {
+  if (process.env.FB_PAGE_ACCESS_TOKEN) {
+    // No-bucket IG publishing: reuse Telegram's uploaded photo URL.
     try {
-      const cardUrl = await uploadCardToStorage(imageBuffer, `${article.id}.png`);
-      const ig = await postToInstagram(cleanTitle, url, { imageUrl: cardUrl });
+      const botToken = mustEnv("TELEGRAM_BOT_TOKEN");
+      let imageUrl = await getTelegramFileUrlFromSendPhoto(botToken, tg);
+      if (!imageUrl) throw new Error("Could not derive Telegram file URL (missing file_id/file_path).");
+
+      // Optional: re-host on imgbb if IG rejects Telegram URLs.
+      if (process.env.IMGBB_API_KEY) {
+        try {
+          const res = await fetch(imageUrl, { signal: AbortSignal.timeout(15000) });
+          if (res.ok) {
+            const buf = Buffer.from(await res.arrayBuffer());
+            const imgbbUrl = await uploadToImgbb(buf, process.env.IMGBB_API_KEY);
+            if (imgbbUrl) imageUrl = imgbbUrl;
+          }
+        } catch (_) {}
+      }
+
+      const ig = await postToInstagram(cleanTitle, url, { imageUrl });
       if (ig) {
-        console.log("Posted to Instagram (with headline card).");
+        console.log("Posted to Instagram (via Telegram image URL).");
         if (ig.id) console.log("Media id:", ig.id);
         instagrammed = true;
       }
     } catch (e) {
       console.error("Instagram error:", e?.message || e);
     }
-  }
-  if (process.env.FB_PAGE_ACCESS_TOKEN && !process.env.FIREBASE_STORAGE_BUCKET) {
-    console.log("Instagram (Storage) skipped: FIREBASE_STORAGE_BUCKET not set. If enabled, IG runs via the Telegram → Instagram workflow step.");
+
+    // Storage-based IG publishing (requires Firebase Storage).
+    if (!instagrammed && process.env.FIREBASE_STORAGE_BUCKET) {
+      try {
+        const cardUrl = await uploadCardToStorage(imageBuffer, `${article.id}.png`);
+        const ig = await postToInstagram(cleanTitle, url, { imageUrl: cardUrl });
+        if (ig) {
+          console.log("Posted to Instagram (with headline card via Storage).");
+          if (ig.id) console.log("Media id:", ig.id);
+          instagrammed = true;
+        }
+      } catch (e) {
+        console.error("Instagram(Storage) error:", e?.message || e);
+      }
+    }
   }
 
   let tweeted = false;
