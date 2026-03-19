@@ -1,5 +1,4 @@
-# Auto-post latest article to Telegram and IG on a schedule.
-# Source is Firestore articles; script posts to Telegram first, then IG.
+# Auto-post latest article to Telegram + IG, with optional FB and IG Story.
 name: Post to social
 
 on:
@@ -32,9 +31,13 @@ jobs:
           FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
           FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
           IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
           IMGBB_API_KEY: ${{ secrets.IMGBB_API_KEY }}
-          # Optional toggles
+          # Optional toggles via repo Variables
           SHORTEN_LINK: ${{ vars.SHORTEN_LINK }}
+          POST_TO_FACEBOOK: ${{ vars.POST_TO_FACEBOOK }}
+          POST_TO_FACEBOOK_STORY: ${{ vars.POST_TO_FACEBOOK_STORY }}
+          POST_TO_IG_STORY: ${{ vars.POST_TO_IG_STORY }}
           FAIL_IF_NOTHING_POSTED: ${{ vars.FAIL_IF_NOTHING_POSTED }}
           FAIL_IF_INSTAGRAM_FAIL: ${{ vars.FAIL_IF_INSTAGRAM_FAIL }}
         run: node scripts/post-to-social.js
