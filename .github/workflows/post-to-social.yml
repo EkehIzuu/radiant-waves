@@ -36,4 +36,5 @@ jobs:
           # Optional toggles
           SHORTEN_LINK: ${{ vars.SHORTEN_LINK }}
           FAIL_IF_NOTHING_POSTED: ${{ vars.FAIL_IF_NOTHING_POSTED }}
+          FAIL_IF_INSTAGRAM_FAIL: ${{ vars.FAIL_IF_INSTAGRAM_FAIL }}
         run: node scripts/post-to-social.js
