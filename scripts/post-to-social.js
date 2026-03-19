@@ -477,6 +477,8 @@ async function postToInstagram(caption, link, options = {}) {
   const pageId = process.env.FB_PAGE_ID || "me";
   const igUserIdFromEnv = process.env.IG_USER_ID;
 
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
   // Prefer an explicit IG user id when provided; otherwise resolve via Page.
   let igUserId = igUserIdFromEnv || "";
   if (!igUserId) {
@@ -507,14 +509,34 @@ async function postToInstagram(caption, link, options = {}) {
 
   // 2) Publish the container
   const pubParams = new URLSearchParams({ creation_id: creationId, access_token: token });
-  const pubRes = await fetch(`${graph}/${igUserId}/media_publish`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: pubParams,
-  });
-  const pubData = await pubRes.json();
-  if (pubData.error) throw new Error(pubData.error.message || "Instagram publish failed");
-  return pubData; // { id: media id }
+  let lastError = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const pubRes = await fetch(`${graph}/${igUserId}/media_publish`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: pubParams,
+    });
+    const pubData = await pubRes.json();
+    if (!pubData.error) return pubData; // { id: media id }
+
+    lastError = pubData.error?.message || pubData.error || pubData;
+    const msg = typeof lastError === "string" ? lastError : JSON.stringify(lastError);
+
+    // Common Instagram async behavior: creation container not ready yet.
+    if (msg.toLowerCase().includes("media id is not available")) {
+      console.warn(`Instagram publish retry ${attempt}/3 after async container not ready...`);
+      await sleep(2500 * attempt);
+      continue;
+    }
+
+    throw new Error(msg || "Instagram publish failed");
+  }
+
+  throw new Error(
+    typeof lastError === "string"
+      ? lastError
+      : "Instagram publish failed after retries"
+  );
 }
 
 /** Post to X (Twitter): optional card image + text + link. Tweet text kept within 280 chars. */
