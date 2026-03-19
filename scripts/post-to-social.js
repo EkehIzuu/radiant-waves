@@ -118,21 +118,40 @@ function getArticleSlug(data, docId) {
   return data.slug || slugify(title) || docId || "story";
 }
 
-/** Build article URL: prefer stored canonical URL if it's our site, else build from slug (same as build-seo-pages). */
-function buildArticleUrl(data, docId) {
-  const canonical =
-    data.canonicalUrl ||
-    data.pageUrl ||
-    data.url ||
-    data.link ||
-    "";
-  if (
-    canonical &&
-    typeof canonical === "string" &&
-    canonical.includes("radiant-waves.com.ng")
-  ) {
-    return canonical.replace(/\#.*$/, "").replace(/\?.*$/, "").replace(/\/?$/, "") + "/";
+/** Clean/validate a raw URL-like value from Firestore fields. */
+function normalizeArticleUrl(raw) {
+  if (!raw || typeof raw !== "string") return "";
+  // Some feeds may include HTML entities/tags; strip obvious noise first.
+  const cleaned = raw
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&")
+    .trim();
+  if (!/^https?:\/\//i.test(cleaned)) return "";
+  try {
+    const u = new URL(cleaned);
+    // Normalize by removing fragment and trailing slash duplication.
+    u.hash = "";
+    const out = u.toString().replace(/\/?$/, "/");
+    return out;
+  } catch {
+    return "";
   }
+}
+
+/** Build article URL: always prefer real stored URL fields, fallback to site slug only when missing. */
+function buildArticleUrl(data, docId) {
+  const candidates = [
+    data.canonicalUrl,
+    data.pageUrl,
+    data.url,
+    data.link,
+  ];
+
+  for (const c of candidates) {
+    const normalized = normalizeArticleUrl(c);
+    if (normalized) return normalized;
+  }
+
   const slug = getArticleSlug(data, docId);
   return `${SITE}/news/${slug}/`;
 }
