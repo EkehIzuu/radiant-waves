@@ -52,7 +52,11 @@ async function initFirebase() {
   const raw = mustEnv("FIREBASE_SERVICE_ACCOUNT_JSON");
   const cred = typeof raw === "string" ? JSON.parse(raw) : raw;
   if (!admin.apps.length) {
-    const storageBucket = process.env.FIREBASE_STORAGE_BUCKET || (cred.project_id && `${cred.project_id}.appspot.com`);
+    const storageBucket =
+      process.env.FIREBASE_STORAGE_BUCKET ||
+      (cred.project_id && `${cred.project_id}.appspot.com`);
+    console.log("Firebase project_id:", cred.project_id);
+    console.log("Using Firebase Storage bucket:", storageBucket || "(not set)");
     admin.initializeApp({
       credential: admin.credential.cert(cred),
       ...(storageBucket && { storageBucket }),
@@ -670,18 +674,24 @@ async function main() {
   let instagrammed = false;
   let instagramErrorMessage = "";
   if (process.env.FB_PAGE_ACCESS_TOKEN) {
-    // Prefer Storage URL first (most reliable for IG media validation).
-    try {
-      const cardUrl = await uploadCardToStorage(imageBuffer, `${article.id}.png`);
-      const ig = await postToInstagram(cleanTitle, url, { imageUrl: cardUrl });
-      if (ig) {
-        console.log("Posted to Instagram (with headline card via Storage).");
-        if (ig.id) console.log("Media id:", ig.id);
-        instagrammed = true;
+    // Prefer Firebase Storage URL first, but only if we actually have a bucket configured.
+    // Otherwise we may hit "bucket does not exist" (404) when the user hasn't enabled Storage.
+    const canUseStorage = Boolean(process.env.FIREBASE_STORAGE_BUCKET && process.env.FIREBASE_STORAGE_BUCKET.trim().length > 0);
+    if (canUseStorage) {
+      try {
+        const cardUrl = await uploadCardToStorage(imageBuffer, `${article.id}.png`);
+        const ig = await postToInstagram(cleanTitle, url, { imageUrl: cardUrl });
+        if (ig) {
+          console.log("Posted to Instagram (with headline card via Storage).");
+          if (ig.id) console.log("Media id:", ig.id);
+          instagrammed = true;
+        }
+      } catch (e) {
+        instagramErrorMessage = e?.message || String(e);
+        console.error("Instagram(Storage) error:", instagramErrorMessage);
       }
-    } catch (e) {
-      instagramErrorMessage = e?.message || String(e);
-      console.error("Instagram(Storage) error:", instagramErrorMessage);
+    } else {
+      console.log("Skipping Firebase Storage for IG (FIREBASE_STORAGE_BUCKET not set).");
     }
 
     // Fallback: reuse Telegram file URL (and optionally re-host to imgbb).
