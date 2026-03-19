@@ -1,19 +1,17 @@
-# Auto-post latest article to Telegram, optional Facebook, optional Instagram, optional X (Twitter) on a schedule.
-# Runs every 6 hours. Ensure repo secrets are set (see DEPLOY.md).
-
-name: Telegram → IG (Business Suite)
+# Auto-post latest article to Telegram and IG on a schedule.
+# Source is Firestore articles; script posts to Telegram first, then IG.
+name: Post to social
 
 on:
   schedule:
-    # Every 4 hours (UTC)
-    - cron: "0 */4 * * *"
+    # Every 3 hours 30 minutes (UTC)
+    - cron: "0 */7 * * *"
+    - cron: "30 3-23/7 * * *"
   workflow_dispatch: # Allow manual run from Actions tab
 
 jobs:
   post:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,23 +24,16 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Telegram → Instagram (no Firebase)
+      - name: Post latest article to Telegram + IG
         env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
+          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
           IMGBB_API_KEY: ${{ secrets.IMGBB_API_KEY }}
-        run: node scripts/telegram-to-instagram.js
-
-      - name: Save state.json back to repo
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          # state.json is modified by the script; stash it so we can rebase cleanly
-          git stash push -u -m "state" -- state.json || true
-          git pull --rebase
-          git stash pop || true
-          git add state.json
-          git diff --cached --quiet && echo "No state changes" && exit 0
-          git commit -m "chore: update telegram state"
-          git push
+          # Optional toggles
+          SHORTEN_LINK: ${{ vars.SHORTEN_LINK }}
+          FAIL_IF_NOTHING_POSTED: ${{ vars.FAIL_IF_NOTHING_POSTED }}
+        run: node scripts/post-to-social.js
