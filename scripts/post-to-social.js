@@ -482,6 +482,41 @@ async function postToFacebook(caption, link, options = {}) {
   return data;
 }
 
+/** Post to Facebook Story (Page story) using the Stories API flow. */
+async function postToFacebookStory(options = {}) {
+  const token = process.env.FB_PAGE_ACCESS_TOKEN;
+  const pageId = process.env.FB_PAGE_ID || "me";
+  if (!token || !options.imageBuffer) return null;
+
+  // Step 1: Upload photo unpublished to get photo_id
+  const form = new FormData();
+  form.append("published", "false");
+  form.append("source", new Blob([options.imageBuffer], { type: "image/png" }), "story.png");
+  form.append("access_token", token);
+  const uploadRes = await fetch(`https://graph.facebook.com/v18.0/${pageId}/photos`, {
+    method: "POST",
+    body: form,
+  });
+  const uploadData = await uploadRes.json();
+  if (uploadData.error) throw new Error(uploadData.error.message || "Facebook Story upload failed");
+  const photoId = uploadData.id;
+  if (!photoId) throw new Error("No photo_id returned for Facebook Story");
+
+  // Step 2: Publish story with photo_id
+  const storyParams = new URLSearchParams({
+    photo_id: photoId,
+    access_token: token,
+  });
+  const storyRes = await fetch(`https://graph.facebook.com/v18.0/${pageId}/photo_stories`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: storyParams,
+  });
+  const storyData = await storyRes.json();
+  if (storyData.error) throw new Error(storyData.error.message || "Facebook Story publish failed");
+  return storyData; // { success: true, post_id: ... }
+}
+
 /** Post to Instagram (Business) via Graph API. Needs imageUrl (public or signed). Uses FB Page token; IG account must be linked to the Page. */
 async function postToInstagram(caption, link, options = {}) {
   const token = process.env.FB_PAGE_ACCESS_TOKEN;
@@ -523,6 +558,44 @@ async function postToInstagram(caption, link, options = {}) {
   const pubData = await pubRes.json();
   if (pubData.error) throw new Error(pubData.error.message || "Instagram publish failed");
   return pubData; // { id: media id }
+}
+
+/** Optional: publish the same image as an Instagram Story. */
+async function postToInstagramStory(options = {}) {
+  const token = process.env.FB_PAGE_ACCESS_TOKEN;
+  if (!token || !options.imageUrl) return null;
+
+  const graph = "https://graph.facebook.com/v18.0";
+  const meRes = await fetch(`${graph}/me?fields=instagram_business_account&access_token=${encodeURIComponent(token)}`);
+  const meData = await meRes.json();
+  if (meData.error) throw new Error(meData.error.message || "Facebook Graph: me");
+  const igUserId = meData.instagram_business_account?.id;
+  if (!igUserId) throw new Error("No Instagram Business account linked to this Page.");
+
+  const createParams = new URLSearchParams({
+    image_url: options.imageUrl,
+    media_type: "STORIES",
+    access_token: token,
+  });
+  const createRes = await fetch(`${graph}/${igUserId}/media`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: createParams,
+  });
+  const createData = await createRes.json();
+  if (createData.error) throw new Error(createData.error.message || "Instagram Story create failed");
+  const creationId = createData.id;
+  if (!creationId) throw new Error("No creation_id from Instagram Story");
+
+  const pubParams = new URLSearchParams({ creation_id: creationId, access_token: token });
+  const pubRes = await fetch(`${graph}/${igUserId}/media_publish`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: pubParams,
+  });
+  const pubData = await pubRes.json();
+  if (pubData.error) throw new Error(pubData.error.message || "Instagram Story publish failed");
+  return pubData;
 }
 
 /** Post to X (Twitter): optional card image + text + link. Tweet text kept within 280 chars. */
@@ -666,7 +739,22 @@ async function main() {
     }
   }
 
+  let facebookStoried = false;
+  if (process.env.POST_TO_FACEBOOK_STORY === "1" && process.env.FB_PAGE_ACCESS_TOKEN) {
+    try {
+      const fbs = await postToFacebookStory({ imageBuffer });
+      if (fbs) {
+        console.log("Posted to Facebook Story.");
+        if (fbs.post_id) console.log("Facebook Story post id:", fbs.post_id);
+        facebookStoried = true;
+      }
+    } catch (e) {
+      console.error("Facebook Story error:", e?.message || e);
+    }
+  }
+
   let instagrammed = false;
+  let igImageUrlUsed = "";
   if (process.env.FB_PAGE_ACCESS_TOKEN) {
     // No-bucket IG publishing: reuse Telegram's uploaded photo URL.
     try {
@@ -690,6 +778,7 @@ async function main() {
       if (ig) {
         console.log("Posted to Instagram (via Telegram image URL).");
         if (ig.id) console.log("Media id:", ig.id);
+        igImageUrlUsed = imageUrl;
         instagrammed = true;
       }
     } catch (e) {
@@ -704,11 +793,27 @@ async function main() {
         if (ig) {
           console.log("Posted to Instagram (with headline card via Storage).");
           if (ig.id) console.log("Media id:", ig.id);
+          igImageUrlUsed = cardUrl;
           instagrammed = true;
         }
       } catch (e) {
         console.error("Instagram(Storage) error:", e?.message || e);
       }
+    }
+  }
+
+  // Story is a separate API publish; it does not automatically happen from feed publish.
+  if (
+    instagrammed &&
+    igImageUrlUsed &&
+    (process.env.POST_TO_IG_STORY === "1" || process.env.POST_TO_IG_STORY === "true")
+  ) {
+    try {
+      const st = await postToInstagramStory({ imageUrl: igImageUrlUsed });
+      if (st?.id) console.log("Posted to Instagram Story. Media id:", st.id);
+      else console.log("Posted to Instagram Story.");
+    } catch (e) {
+      console.error("Instagram Story error:", e?.message || e);
     }
   }
 
@@ -735,6 +840,7 @@ async function main() {
 
   const update = { postedToTelegramAt: admin.firestore.FieldValue.serverTimestamp() };
   if (facebooked) update.postedToFacebookAt = admin.firestore.FieldValue.serverTimestamp();
+  if (facebookStoried) update.postedToFacebookStoryAt = admin.firestore.FieldValue.serverTimestamp();
   if (instagrammed) update.postedToInstagramAt = admin.firestore.FieldValue.serverTimestamp();
   if (tweeted) update.postedToTwitterAt = admin.firestore.FieldValue.serverTimestamp();
   await article.ref.update(update);
