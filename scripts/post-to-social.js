@@ -137,6 +137,37 @@ function buildArticleUrl(data, docId) {
   return `${SITE}/news/${slug}/`;
 }
 
+/** Optional: shorten URL for posts. Set SHORTEN_LINK=1. Uses TinyURL (no key) or Bitly if BITLY_ACCESS_TOKEN is set. */
+async function shortenUrl(longUrl) {
+  if (!longUrl || typeof longUrl !== "string") return longUrl;
+  const useBitly = process.env.BITLY_ACCESS_TOKEN;
+  try {
+    if (useBitly) {
+      const res = await fetch("https://api-ssl.bitly.com/v4/shorten", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.BITLY_ACCESS_TOKEN}`,
+        },
+        body: JSON.stringify({ long_url: longUrl }),
+      });
+      const data = await res.json();
+      if (data.link) return data.link;
+      throw new Error(data.message || "Bitly shorten failed");
+    }
+    const res = await fetch(
+      `https://tinyurl.com/api-create.php?url=${encodeURIComponent(longUrl)}`,
+      { signal: AbortSignal.timeout(10000) }
+    );
+    const text = (await res.text()).trim();
+    if (text && text.startsWith("http")) return text;
+    throw new Error("TinyURL returned invalid response");
+  } catch (e) {
+    console.warn("Shorten failed, using long URL:", e?.message || e);
+    return longUrl;
+  }
+}
+
 /** Get image URL from built article page (news/{slug}/index.html) og:image meta. Used when Firestore has no image. */
 function getImageFromBuiltPage(slug) {
   const htmlPath = path.join(process.cwd(), "news", slug, "index.html");
@@ -439,12 +470,19 @@ async function postToInstagram(caption, link, options = {}) {
 
   const captionText = link ? `${stripHtml(caption)}\n\n${link}` : stripHtml(caption);
   const graph = "https://graph.facebook.com/v18.0";
+  const pageId = process.env.FB_PAGE_ID || "me";
+  const igUserIdFromEnv = process.env.IG_USER_ID;
 
-  // Resolve "me" to get the Instagram Business Account ID linked to the Page
-  const meRes = await fetch(`${graph}/me?fields=instagram_business_account&access_token=${encodeURIComponent(token)}`);
-  const meData = await meRes.json();
-  if (meData.error) throw new Error(meData.error.message || "Facebook Graph: me");
-  const igUserId = meData.instagram_business_account?.id;
+  // Prefer an explicit IG user id when provided; otherwise resolve via Page.
+  let igUserId = igUserIdFromEnv || "";
+  if (!igUserId) {
+    const pageRes = await fetch(
+      `${graph}/${encodeURIComponent(pageId)}?fields=instagram_business_account&access_token=${encodeURIComponent(token)}`
+    );
+    const pageData = await pageRes.json();
+    if (pageData.error) throw new Error(pageData.error.message || "Facebook Graph: page lookup");
+    igUserId = pageData.instagram_business_account?.id || "";
+  }
   if (!igUserId) throw new Error("No Instagram Business account linked to this Page. Connect IG in Page settings.");
 
   // 1) Create media container (image_url + caption)
@@ -579,7 +617,11 @@ async function main() {
 
   const title = article.data.title || article.data.headline || "Radiant Waves";
   const cleanTitle = stripHtml(title);
-  const url = buildArticleUrl(article.data, article.id);
+  let url = buildArticleUrl(article.data, article.id);
+  if (process.env.SHORTEN_LINK === "1" || process.env.SHORTEN_LINK === "true") {
+    url = await shortenUrl(url);
+    console.log("Short link:", url);
+  }
   const articleImageUrl = getArticleImageUrl(article);
 
   console.log("Posting:", cleanTitle.slice(0, 60) + "...");
