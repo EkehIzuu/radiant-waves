@@ -670,50 +670,47 @@ async function main() {
   let instagrammed = false;
   let instagramErrorMessage = "";
   if (process.env.FB_PAGE_ACCESS_TOKEN) {
-    // No-bucket IG publishing: reuse Telegram's uploaded photo URL.
+    // Prefer Storage URL first (most reliable for IG media validation).
     try {
-      const botToken = mustEnv("TELEGRAM_BOT_TOKEN");
-      let imageUrl = await getTelegramFileUrlFromSendPhoto(botToken, tg);
-      if (!imageUrl) throw new Error("Could not derive Telegram file URL (missing file_id/file_path).");
-
-      // Optional: re-host on imgbb if IG rejects Telegram URLs.
-      if (process.env.IMGBB_API_KEY) {
-        try {
-          const res = await fetch(imageUrl, { signal: AbortSignal.timeout(15000) });
-          if (res.ok) {
-            const buf = Buffer.from(await res.arrayBuffer());
-            const imgbbUrl = await uploadToImgbb(buf, process.env.IMGBB_API_KEY);
-            if (imgbbUrl) imageUrl = imgbbUrl;
-          }
-        } catch (_) {}
-      }
-
-      const ig = await postToInstagram(cleanTitle, url, { imageUrl });
+      const cardUrl = await uploadCardToStorage(imageBuffer, `${article.id}.png`);
+      const ig = await postToInstagram(cleanTitle, url, { imageUrl: cardUrl });
       if (ig) {
-        console.log("Posted to Instagram (via Telegram image URL).");
+        console.log("Posted to Instagram (with headline card via Storage).");
         if (ig.id) console.log("Media id:", ig.id);
         instagrammed = true;
       }
     } catch (e) {
       instagramErrorMessage = e?.message || String(e);
-      console.error("Instagram error:", instagramErrorMessage);
+      console.error("Instagram(Storage) error:", instagramErrorMessage);
     }
 
-    // Storage-based IG publishing fallback.
-    // We attempt this even when FIREBASE_STORAGE_BUCKET isn't explicitly set,
-    // because initFirebase configures a default bucket from project_id.
+    // Fallback: reuse Telegram file URL (and optionally re-host to imgbb).
     if (!instagrammed) {
       try {
-        const cardUrl = await uploadCardToStorage(imageBuffer, `${article.id}.png`);
-        const ig = await postToInstagram(cleanTitle, url, { imageUrl: cardUrl });
+        const botToken = mustEnv("TELEGRAM_BOT_TOKEN");
+        let imageUrl = await getTelegramFileUrlFromSendPhoto(botToken, tg);
+        if (!imageUrl) throw new Error("Could not derive Telegram file URL (missing file_id/file_path).");
+
+        if (process.env.IMGBB_API_KEY) {
+          try {
+            const res = await fetch(imageUrl, { signal: AbortSignal.timeout(15000) });
+            if (res.ok) {
+              const buf = Buffer.from(await res.arrayBuffer());
+              const imgbbUrl = await uploadToImgbb(buf, process.env.IMGBB_API_KEY);
+              if (imgbbUrl) imageUrl = imgbbUrl;
+            }
+          } catch (_) {}
+        }
+
+        const ig = await postToInstagram(cleanTitle, url, { imageUrl });
         if (ig) {
-          console.log("Posted to Instagram (with headline card via Storage).");
+          console.log("Posted to Instagram (via Telegram image URL).");
           if (ig.id) console.log("Media id:", ig.id);
           instagrammed = true;
         }
       } catch (e) {
         instagramErrorMessage = e?.message || String(e);
-        console.error("Instagram(Storage) error:", instagramErrorMessage);
+        console.error("Instagram(Telegram URL) error:", instagramErrorMessage);
       }
     }
   }
