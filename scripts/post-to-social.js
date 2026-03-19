@@ -52,11 +52,7 @@ async function initFirebase() {
   const raw = mustEnv("FIREBASE_SERVICE_ACCOUNT_JSON");
   const cred = typeof raw === "string" ? JSON.parse(raw) : raw;
   if (!admin.apps.length) {
-    const storageBucket =
-      process.env.FIREBASE_STORAGE_BUCKET ||
-      (cred.project_id && `${cred.project_id}.appspot.com`);
-    console.log("Firebase project_id:", cred.project_id);
-    console.log("Using Firebase Storage bucket:", storageBucket || "(not set)");
+    const storageBucket = process.env.FIREBASE_STORAGE_BUCKET || (cred.project_id && `${cred.project_id}.appspot.com`);
     admin.initializeApp({
       credential: admin.credential.cert(cred),
       ...(storageBucket && { storageBucket }),
@@ -261,8 +257,8 @@ async function makePlaceholderImage() {
   const svg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
   <rect width="${W}" height="${H}" fill="#161a1f" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
-  <text x="${W / 2}" y="${H / 2 - 12}" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#8b929e" text-anchor="middle">No image</text>
-  <text x="${W / 2}" y="${H / 2 + 20}" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#8b929e" text-anchor="middle">for this article</text>
+  <text x="${W / 2}" y="${H / 2 - 12}" font-family="TT Moons, TT-Moons, TTMoons, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif" font-size="24" font-weight="700" fill="#8b929e" text-anchor="middle">No image</text>
+  <text x="${W / 2}" y="${H / 2 + 20}" font-family="TT Moons, TT-Moons, TTMoons, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif" font-size="24" font-weight="700" fill="#8b929e" text-anchor="middle">for this article</text>
 </svg>`;
   return sharp(Buffer.from(svg)).png().toBuffer();
 }
@@ -345,18 +341,18 @@ async function generateArticleCard(title, articleImageUrl, imageBufferPreloaded 
   const lineY3 = LINES_TOP + 35;
   const decoSvg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${TOTAL_H}" viewBox="0 0 ${W} ${TOTAL_H}">
-  <text x="${PAD + STRIPE_W + 16}" y="65" font-family="Arial, sans-serif" font-size="45" font-weight="650" fill="${ACCENT_COLOR}" text-anchor="start">NEWS</text>
+  <text x="${PAD + STRIPE_W + 16}" y="65" font-family="TT Moons, TT-Moons, TTMoons, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif" font-size="45" font-weight="650" fill="${ACCENT_COLOR}" text-anchor="start">NEWS</text>
   <rect x="${IMAGE_LEFT}" y="${IMAGE_TOP}" width="${IMAGE_W}" height="${IMAGE_H}" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
   ${starsTr.join("\n  ")}
   ${starsBl.join("\n  ")}
   <line x1="${PAD}" y1="${HEADLINE_TOP + 24}" x2="${PAD}" y2="${HEADLINE_TOP + 140}" stroke="${ACCENT_COLOR}" stroke-width="4"/>
-  <text x="${headlineX}" y="${HEADLINE_TOP + 42}" font-family="Arial, sans-serif" font-size="60" font-weight="800" fill="${HEADLINE_FILL}" text-anchor="start">
+  <text x="${headlineX}" y="${HEADLINE_TOP + 42}" font-family="TT Moons, TT-Moons, TTMoons, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif" font-size="60" font-weight="800" fill="${HEADLINE_FILL}" text-anchor="start">
     ${tspans}
   </text>
   <line x1="${LINE_LEFT}" y1="${lineY1}" x2="${LINE_LEFT + LINE_LEN}" y2="${lineY1}" stroke="${ACCENT_COLOR}" stroke-width="7" opacity="0.9"/>
   <line x1="${LINE_LEFT}" y1="${lineY2}" x2="${LINE_LEFT + LINE_LEN}" y2="${lineY2}" stroke="${SECONDARY_COLOR}" stroke-width="5.5" opacity="0.9"/>
   <line x1="${LINE_LEFT}" y1="${lineY3}" x2="${LINE_LEFT + LINE_LEN}" y2="${lineY3}" stroke="${ACCENT_COLOR}" stroke-width="7" opacity="0.9"/>
-  <text x="${W / 2}" y="${BRAND_TOP + 14}" font-family="Arial, sans-serif" font-size="40" font-weight="600" fill="${HEADLINE_FILL}" text-anchor="middle">RADIANT WAVES</text>
+  <text x="${W / 2}" y="${BRAND_TOP + 14}" font-family="TT Moons, TT-Moons, TTMoons, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif" font-size="40" font-weight="600" fill="${HEADLINE_FILL}" text-anchor="middle">RADIANT WAVES</text>
   <line x1="${W / 2 - 150}" y1="${BRAND_TOP + 54}" x2="${W / 2 + 150}" y2="${BRAND_TOP + 54}" stroke="${SECONDARY_COLOR}" stroke-width="7" opacity="0.9"/>
 </svg>`;
   const decoBuf = await sharp(Buffer.from(decoSvg)).png().toBuffer();
@@ -474,21 +470,12 @@ async function postToInstagram(caption, link, options = {}) {
 
   const captionText = link ? `${stripHtml(caption)}\n\n${link}` : stripHtml(caption);
   const graph = "https://graph.facebook.com/v18.0";
-  const pageId = process.env.FB_PAGE_ID || "me";
-  const igUserIdFromEnv = process.env.IG_USER_ID;
 
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-  // Prefer an explicit IG user id when provided; otherwise resolve via Page.
-  let igUserId = igUserIdFromEnv || "";
-  if (!igUserId) {
-    const pageRes = await fetch(
-      `${graph}/${encodeURIComponent(pageId)}?fields=instagram_business_account&access_token=${encodeURIComponent(token)}`
-    );
-    const pageData = await pageRes.json();
-    if (pageData.error) throw new Error(pageData.error.message || "Facebook Graph: page lookup");
-    igUserId = pageData.instagram_business_account?.id || "";
-  }
+  // Resolve "me" to get the Instagram Business Account ID linked to the Page
+  const meRes = await fetch(`${graph}/me?fields=instagram_business_account&access_token=${encodeURIComponent(token)}`);
+  const meData = await meRes.json();
+  if (meData.error) throw new Error(meData.error.message || "Facebook Graph: me");
+  const igUserId = meData.instagram_business_account?.id;
   if (!igUserId) throw new Error("No Instagram Business account linked to this Page. Connect IG in Page settings.");
 
   // 1) Create media container (image_url + caption)
@@ -509,34 +496,14 @@ async function postToInstagram(caption, link, options = {}) {
 
   // 2) Publish the container
   const pubParams = new URLSearchParams({ creation_id: creationId, access_token: token });
-  let lastError = null;
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    const pubRes = await fetch(`${graph}/${igUserId}/media_publish`, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: pubParams,
-    });
-    const pubData = await pubRes.json();
-    if (!pubData.error) return pubData; // { id: media id }
-
-    lastError = pubData.error?.message || pubData.error || pubData;
-    const msg = typeof lastError === "string" ? lastError : JSON.stringify(lastError);
-
-    // Common Instagram async behavior: creation container not ready yet.
-    if (msg.toLowerCase().includes("media id is not available")) {
-      console.warn(`Instagram publish retry ${attempt}/3 after async container not ready...`);
-      await sleep(2500 * attempt);
-      continue;
-    }
-
-    throw new Error(msg || "Instagram publish failed");
-  }
-
-  throw new Error(
-    typeof lastError === "string"
-      ? lastError
-      : "Instagram publish failed after retries"
-  );
+  const pubRes = await fetch(`${graph}/${igUserId}/media_publish`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: pubParams,
+  });
+  const pubData = await pubRes.json();
+  if (pubData.error) throw new Error(pubData.error.message || "Instagram publish failed");
+  return pubData; // { id: media id }
 }
 
 /** Post to X (Twitter): optional card image + text + link. Tweet text kept within 280 chars. */
@@ -602,15 +569,6 @@ function getArticleSourceUrl(data) {
 }
 
 async function main() {
-  console.log("Social run config:", JSON.stringify({
-    hasFirebase: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_JSON),
-    hasTelegramToken: Boolean(process.env.TELEGRAM_BOT_TOKEN),
-    hasTelegramChatId: Boolean(process.env.TELEGRAM_CHAT_ID),
-    hasPageToken: Boolean(process.env.FB_PAGE_ACCESS_TOKEN),
-    hasPageId: Boolean(process.env.FB_PAGE_ID),
-    hasIgUserId: Boolean(process.env.IG_USER_ID),
-  }));
-
   const db = await initFirebase();
   let article = await getNextUnpostedArticle(db);
   let imageBuf = null;
@@ -646,11 +604,7 @@ async function main() {
   }
 
   if (!article) {
-    const msg = "No unposted article with a working image found. Nothing to post.";
-    if (process.env.FAIL_IF_NOTHING_POSTED === "1" || process.env.FAIL_IF_NOTHING_POSTED === "true") {
-      throw new Error(msg);
-    }
-    console.log(msg);
+    console.log("No unposted article with a working image found. Nothing to post.");
     return;
   }
 
@@ -694,12 +648,37 @@ async function main() {
   }
 
   let instagrammed = false;
-  let instagramErrorMessage = "";
   if (process.env.FB_PAGE_ACCESS_TOKEN) {
-    // Prefer Firebase Storage URL first, but only if we actually have a bucket configured.
-    // Otherwise we may hit "bucket does not exist" (404) when the user hasn't enabled Storage.
-    const canUseStorage = Boolean(process.env.FIREBASE_STORAGE_BUCKET && process.env.FIREBASE_STORAGE_BUCKET.trim().length > 0);
-    if (canUseStorage) {
+    // No-bucket IG publishing: reuse Telegram's uploaded photo URL.
+    try {
+      const botToken = mustEnv("TELEGRAM_BOT_TOKEN");
+      let imageUrl = await getTelegramFileUrlFromSendPhoto(botToken, tg);
+      if (!imageUrl) throw new Error("Could not derive Telegram file URL (missing file_id/file_path).");
+
+      // Optional: re-host on imgbb if IG rejects Telegram URLs.
+      if (process.env.IMGBB_API_KEY) {
+        try {
+          const res = await fetch(imageUrl, { signal: AbortSignal.timeout(15000) });
+          if (res.ok) {
+            const buf = Buffer.from(await res.arrayBuffer());
+            const imgbbUrl = await uploadToImgbb(buf, process.env.IMGBB_API_KEY);
+            if (imgbbUrl) imageUrl = imgbbUrl;
+          }
+        } catch (_) {}
+      }
+
+      const ig = await postToInstagram(cleanTitle, url, { imageUrl });
+      if (ig) {
+        console.log("Posted to Instagram (via Telegram image URL).");
+        if (ig.id) console.log("Media id:", ig.id);
+        instagrammed = true;
+      }
+    } catch (e) {
+      console.error("Instagram error:", e?.message || e);
+    }
+
+    // Storage-based IG publishing (requires Firebase Storage).
+    if (!instagrammed && process.env.FIREBASE_STORAGE_BUCKET) {
       try {
         const cardUrl = await uploadCardToStorage(imageBuffer, `${article.id}.png`);
         const ig = await postToInstagram(cleanTitle, url, { imageUrl: cardUrl });
@@ -709,48 +688,8 @@ async function main() {
           instagrammed = true;
         }
       } catch (e) {
-        instagramErrorMessage = e?.message || String(e);
-        console.error("Instagram(Storage) error:", instagramErrorMessage);
+        console.error("Instagram(Storage) error:", e?.message || e);
       }
-    } else {
-      console.log("Skipping Firebase Storage for IG (FIREBASE_STORAGE_BUCKET not set).");
-    }
-
-    // Fallback: reuse Telegram file URL (and optionally re-host to imgbb).
-    if (!instagrammed) {
-      try {
-        const botToken = mustEnv("TELEGRAM_BOT_TOKEN");
-        let imageUrl = await getTelegramFileUrlFromSendPhoto(botToken, tg);
-        if (!imageUrl) throw new Error("Could not derive Telegram file URL (missing file_id/file_path).");
-
-        if (process.env.IMGBB_API_KEY) {
-          try {
-            const res = await fetch(imageUrl, { signal: AbortSignal.timeout(15000) });
-            if (res.ok) {
-              const buf = Buffer.from(await res.arrayBuffer());
-              const imgbbUrl = await uploadToImgbb(buf, process.env.IMGBB_API_KEY);
-              if (imgbbUrl) imageUrl = imgbbUrl;
-            }
-          } catch (_) {}
-        }
-
-        const ig = await postToInstagram(cleanTitle, url, { imageUrl });
-        if (ig) {
-          console.log("Posted to Instagram (via Telegram image URL).");
-          if (ig.id) console.log("Media id:", ig.id);
-          instagrammed = true;
-        }
-      } catch (e) {
-        instagramErrorMessage = e?.message || String(e);
-        console.error("Instagram(Telegram URL) error:", instagramErrorMessage);
-      }
-    }
-  }
-
-  if (!instagrammed && process.env.FB_PAGE_ACCESS_TOKEN) {
-    console.warn("Instagram was not posted in this run.");
-    if (process.env.FAIL_IF_INSTAGRAM_FAIL === "1" || process.env.FAIL_IF_INSTAGRAM_FAIL === "true") {
-      throw new Error(instagramErrorMessage || "Instagram publish was skipped/failed.");
     }
   }
 
