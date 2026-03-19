@@ -89,6 +89,52 @@ async function getLatestChannelPhoto(botToken, chatId, afterUpdateId) {
   return { item: { imageUrl, caption, update_id: latest.update_id }, maxUpdateId };
 }
 
+/** Optional: shorten a URL. Set SHORTEN_LINK=1. Uses TinyURL (no key) or Bitly if BITLY_ACCESS_TOKEN is set. */
+async function shortenUrl(longUrl) {
+  if (!longUrl || typeof longUrl !== "string") return longUrl;
+  const useBitly = process.env.BITLY_ACCESS_TOKEN;
+  try {
+    if (useBitly) {
+      const res = await fetch("https://api-ssl.bitly.com/v4/shorten", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.BITLY_ACCESS_TOKEN}`,
+        },
+        body: JSON.stringify({ long_url: longUrl }),
+      });
+      const data = await res.json();
+      if (data.link) return data.link;
+      throw new Error(data.message || "Bitly shorten failed");
+    }
+    const res = await fetch(
+      `https://tinyurl.com/api-create.php?url=${encodeURIComponent(longUrl)}`,
+      { signal: AbortSignal.timeout(10000) }
+    );
+    const text = (await res.text()).trim();
+    if (text && text.startsWith("http")) return text;
+    throw new Error("TinyURL returned invalid response");
+  } catch (e) {
+    console.warn("Shorten failed, using long URL:", e?.message || e);
+    return longUrl;
+  }
+}
+
+/** Replace article URLs in caption with shortened version when SHORTEN_LINK=1. */
+async function maybeShortenUrlsInCaption(caption) {
+  if (!caption || typeof caption !== "string") return caption;
+  if (process.env.SHORTEN_LINK !== "1" && process.env.SHORTEN_LINK !== "true") return caption;
+  const urlRe = /https?:\/\/[^\s]+/g;
+  const urls = caption.match(urlRe);
+  if (!urls?.length) return caption;
+  let out = caption;
+  for (const u of urls) {
+    const short = await shortenUrl(u.trim());
+    if (short !== u) out = out.replace(u, short);
+  }
+  return out;
+}
+
 /** If IMGBB_API_KEY is set, upload buffer to imgbb and return the direct image URL. */
 async function uploadToImgbb(imageBuffer, apiKey) {
   if (!apiKey || !imageBuffer?.length) return null;
@@ -108,11 +154,18 @@ async function postToInstagram(caption, options = {}) {
 
   const captionText = typeof caption === "string" ? stripHtml(caption) : "";
   const graph = "https://graph.facebook.com/v18.0";
+  const pageId = process.env.FB_PAGE_ID || "me";
+  const igUserIdFromEnv = process.env.IG_USER_ID;
 
-  const meRes = await fetch(`${graph}/me?fields=instagram_business_account&access_token=${encodeURIComponent(token)}`);
-  const meData = await meRes.json();
-  if (meData.error) throw new Error(meData.error.message || "Facebook Graph: me");
-  const igUserId = meData.instagram_business_account?.id;
+  let igUserId = igUserIdFromEnv || "";
+  if (!igUserId) {
+    const pageRes = await fetch(
+      `${graph}/${encodeURIComponent(pageId)}?fields=instagram_business_account&access_token=${encodeURIComponent(token)}`
+    );
+    const pageData = await pageRes.json();
+    if (pageData.error) throw new Error(pageData.error.message || "Facebook Graph: page lookup");
+    igUserId = pageData.instagram_business_account?.id || "";
+  }
   if (!igUserId) throw new Error("No Instagram Business account linked to this Page. Connect IG in Page settings.");
 
   const createParams = new URLSearchParams({
@@ -187,8 +240,10 @@ async function main() {
     }
   }
 
+  let caption = latest.caption || "";
+  caption = await maybeShortenUrlsInCaption(caption);
   console.log("Posting to Instagram...");
-  const ig = await postToInstagram(latest.caption, { imageUrl });
+  const ig = await postToInstagram(caption, { imageUrl });
   if (ig?.id) {
     console.log("Posted to Instagram. Media id:", ig.id);
   } else {
