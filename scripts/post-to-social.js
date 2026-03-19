@@ -699,8 +699,10 @@ async function main() {
       console.error("Instagram error:", instagramErrorMessage);
     }
 
-    // Storage-based IG publishing (requires Firebase Storage).
-    if (!instagrammed && process.env.FIREBASE_STORAGE_BUCKET) {
+    // Storage-based IG publishing fallback.
+    // We attempt this even when FIREBASE_STORAGE_BUCKET isn't explicitly set,
+    // because initFirebase configures a default bucket from project_id.
+    if (!instagrammed) {
       try {
         const cardUrl = await uploadCardToStorage(imageBuffer, `${article.id}.png`);
         const ig = await postToInstagram(cleanTitle, url, { imageUrl: cardUrl });
