@@ -668,6 +668,7 @@ async function main() {
   }
 
   let instagrammed = false;
+  let instagramErrorMessage = "";
   if (process.env.FB_PAGE_ACCESS_TOKEN) {
     // No-bucket IG publishing: reuse Telegram's uploaded photo URL.
     try {
@@ -694,7 +695,8 @@ async function main() {
         instagrammed = true;
       }
     } catch (e) {
-      console.error("Instagram error:", e?.message || e);
+      instagramErrorMessage = e?.message || String(e);
+      console.error("Instagram error:", instagramErrorMessage);
     }
 
     // Storage-based IG publishing (requires Firebase Storage).
@@ -708,8 +710,16 @@ async function main() {
           instagrammed = true;
         }
       } catch (e) {
-        console.error("Instagram(Storage) error:", e?.message || e);
+        instagramErrorMessage = e?.message || String(e);
+        console.error("Instagram(Storage) error:", instagramErrorMessage);
       }
+    }
+  }
+
+  if (!instagrammed && process.env.FB_PAGE_ACCESS_TOKEN) {
+    console.warn("Instagram was not posted in this run.");
+    if (process.env.FAIL_IF_INSTAGRAM_FAIL === "1" || process.env.FAIL_IF_INSTAGRAM_FAIL === "true") {
+      throw new Error(instagramErrorMessage || "Instagram publish was skipped/failed.");
     }
   }
 
