@@ -576,6 +576,15 @@ function getArticleSourceUrl(data) {
 }
 
 async function main() {
+  console.log("Social run config:", JSON.stringify({
+    hasFirebase: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_JSON),
+    hasTelegramToken: Boolean(process.env.TELEGRAM_BOT_TOKEN),
+    hasTelegramChatId: Boolean(process.env.TELEGRAM_CHAT_ID),
+    hasPageToken: Boolean(process.env.FB_PAGE_ACCESS_TOKEN),
+    hasPageId: Boolean(process.env.FB_PAGE_ID),
+    hasIgUserId: Boolean(process.env.IG_USER_ID),
+  }));
+
   const db = await initFirebase();
   let article = await getNextUnpostedArticle(db);
   let imageBuf = null;
@@ -611,7 +620,11 @@ async function main() {
   }
 
   if (!article) {
-    console.log("No unposted article with a working image found. Nothing to post.");
+    const msg = "No unposted article with a working image found. Nothing to post.";
+    if (process.env.FAIL_IF_NOTHING_POSTED === "1" || process.env.FAIL_IF_NOTHING_POSTED === "true") {
+      throw new Error(msg);
+    }
+    console.log(msg);
     return;
   }
 
