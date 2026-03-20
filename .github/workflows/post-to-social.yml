@@ -33,6 +33,9 @@ jobs:
           FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
           IG_USER_ID: ${{ secrets.IG_USER_ID }}
           SNAPSHOT_URL: ${{ vars.SNAPSHOT_URL }}
+          SITE_URL: ${{ vars.SITE_URL }}
+          SHORTEN_LINK: ${{ vars.SHORTEN_LINK }}
+          BITLY_ACCESS_TOKEN: ${{ secrets.BITLY_ACCESS_TOKEN }}
           IMGBB_API_KEY: ${{ secrets.IMGBB_API_KEY }}
         run: node scripts/post-to-social-snapshot.js
 

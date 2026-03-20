@@ -65,6 +65,41 @@ function normalizeUrl(raw) {
   }
 }
 
+function buildSiteArticleViewUrl(sourceUrl) {
+  const site = env("SITE_URL", "https://radiant-waves.com.ng").replace(/\/+$/, "");
+  return `${site}/#/article?u=${encodeURIComponent(sourceUrl)}`;
+}
+
+async function shortenUrl(longUrl) {
+  if (!longUrl || typeof longUrl !== "string") return longUrl;
+  const bitlyToken = env("BITLY_ACCESS_TOKEN");
+  try {
+    if (bitlyToken) {
+      const res = await fetch("https://api-ssl.bitly.com/v4/shorten", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${bitlyToken}`,
+        },
+        body: JSON.stringify({ long_url: longUrl }),
+      });
+      const data = await res.json();
+      if (data?.link) return data.link;
+      throw new Error(data?.message || "Bitly shorten failed");
+    }
+
+    const res = await fetch(`https://tinyurl.com/api-create.php?url=${encodeURIComponent(longUrl)}`, {
+      signal: AbortSignal.timeout(10000),
+    });
+    const text = (await res.text()).trim();
+    if (text && text.startsWith("http")) return text;
+    throw new Error("TinyURL invalid response");
+  } catch (e) {
+    console.warn("Shorten failed, using original URL:", e?.message || e);
+    return longUrl;
+  }
+}
+
 function pickLatestUnposted(items, state) {
   const lastUrl = state?.last_posted_url || "";
   const sorted = [...items].sort((a, b) => parseTs(b.ingestedAt || b.publishedAt) - parseTs(a.ingestedAt || a.publishedAt));
@@ -211,8 +246,14 @@ async function main() {
   }
 
   console.log("Posting from snapshot:", art.title.slice(0, 80));
+  const longSiteLink = buildSiteArticleViewUrl(art.url);
+  const postLink =
+    (env("SHORTEN_LINK") === "1" || env("SHORTEN_LINK").toLowerCase() === "true")
+      ? await shortenUrl(longSiteLink)
+      : longSiteLink;
+
   const card = await generateCard(art.title, art.imageUrl);
-  const tg = await postTelegram(art.title, art.url, card);
+  const tg = await postTelegram(art.title, postLink, card);
   console.log("Posted to Telegram.");
 
   let imageUrlForIg = "";
@@ -222,7 +263,7 @@ async function main() {
 
   if (env("FB_PAGE_ACCESS_TOKEN") && imageUrlForIg) {
     try {
-      const ig = await postInstagram(`${art.title}\n\n${art.url}`, imageUrlForIg);
+      const ig = await postInstagram(`${art.title}\n\n${postLink}`, imageUrlForIg);
       if (ig?.id) console.log("Posted to Instagram. Media id:", ig.id);
     } catch (e) {
       console.error("Instagram error:", e?.message || e);
