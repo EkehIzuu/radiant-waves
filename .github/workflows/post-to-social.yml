@@ -1,0 +1,54 @@
+# Post latest snapshot article to Telegram, Facebook (feed + optional story), Instagram (feed + optional story).
+name: Post to social (snapshot)
+
+on:
+  schedule:
+    # Every 3 hours 30 minutes (UTC)
+    - cron: "0 */7 * * *"
+    - cron: "30 3-23/7 * * *"
+  workflow_dispatch: # Allow manual run from Actions tab
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Post from snapshot
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
+          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          SNAPSHOT_URL: ${{ vars.SNAPSHOT_URL }}
+          IMGBB_API_KEY: ${{ secrets.IMGBB_API_KEY }}
+          # Set to 1 in GitHub Actions variables to enable each channel
+          POST_TO_FACEBOOK: ${{ vars.POST_TO_FACEBOOK }}
+          POST_TO_FACEBOOK_STORY: ${{ vars.POST_TO_FACEBOOK_STORY }}
+          POST_TO_IG_STORY: ${{ vars.POST_TO_IG_STORY }}
+        run: node scripts/post-to-social-snapshot.js
+
+      - name: Save social state back to repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # social_state.json may be modified by script; stash to rebase cleanly
+          git stash push -u -m "state" -- social_state.json || true
+          git pull --rebase
+          git stash pop || true
+          git add social_state.json
+          git diff --cached --quiet && echo "No state changes" && exit 0
+          git commit -m "chore: update social snapshot state"
+          git push
