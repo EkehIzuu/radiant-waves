@@ -32,6 +32,51 @@ function getPostedUrlSet(state) {
   return new Set(cleaned);
 }
 
+function getSkippedUrlSet(state) {
+  const arr = Array.isArray(state?.skipped_urls) ? state.skipped_urls : [];
+  const cleaned = arr.filter((u) => typeof u === "string" && /^https?:\/\//i.test(u));
+  return new Set(cleaned);
+}
+
+function isLowQualityImageUrl(url) {
+  const s = String(url || "").toLowerCase();
+  return (
+    s.includes("logo") ||
+    s.includes("favicon") ||
+    s.includes("sprite") ||
+    s.includes("placeholder") ||
+    s.includes("default") ||
+    s.includes("avatar") ||
+    s.includes("icon") ||
+    s.endsWith(".svg")
+  );
+}
+
+async function fetchValidatedImageBuffer(imageUrl) {
+  if (!imageUrl || isLowQualityImageUrl(imageUrl)) return null;
+  try {
+    const res = await fetch(imageUrl, {
+      signal: AbortSignal.timeout(15000),
+      headers: { "User-Agent": "RadiantWaves/1.0 (Social Bot)" },
+      redirect: "follow",
+    });
+    if (!res.ok) return null;
+    const ct = String(res.headers.get("content-type") || "").toLowerCase();
+    if (!ct.startsWith("image/")) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (!buf?.length || buf.length < 15000) return null;
+    const meta = await sharp(buf).metadata();
+    const w = Number(meta.width || 0);
+    const h = Number(meta.height || 0);
+    if (w < 600 || h < 315) return null;
+    const ar = w / Math.max(1, h);
+    if (ar < 0.6 || ar > 2.5) return null;
+    return buf;
+  } catch {
+    return null;
+  }
+}
+
 async function loadSnapshotItems() {
   const snapshotUrl = env("SNAPSHOT_URL");
 
@@ -108,13 +153,16 @@ async function shortenUrl(longUrl) {
 
 function pickLatestUnposted(items, state) {
   const postedSet = getPostedUrlSet(state);
+  const skippedSet = getSkippedUrlSet(state);
   const sorted = [...items].sort((a, b) => parseTs(b.ingestedAt || b.publishedAt) - parseTs(a.ingestedAt || a.publishedAt));
   for (const it of sorted) {
     const url = normalizeUrl(it.url || it.link || "");
     const imageUrl = normalizeUrl(it.imageUrl || it.image || "");
     if (!url) continue;
     if (!imageUrl) continue;
+    if (isLowQualityImageUrl(imageUrl)) continue;
     if (postedSet.has(url)) continue;
+    if (skippedSet.has(url)) continue;
     return {
       id: it.id || "",
       title: stripHtml(it.title || "Radiant Waves"),
@@ -125,7 +173,7 @@ function pickLatestUnposted(items, state) {
   return null;
 }
 
-async function generateCard(title, articleImageUrl) {
+async function generateCard(title, articleImageUrl, imageBufferPreloaded = null) {
   const W = 1000;
   const H = 1500;
   const IMAGE_W = 900;
@@ -166,13 +214,13 @@ async function generateCard(title, articleImageUrl) {
 </svg>`;
   const bg = await sharp(Buffer.from(bgSvg)).png().toBuffer();
 
-  let image;
-  try {
-    if (articleImageUrl) {
+  let image = imageBufferPreloaded;
+  if (!image && articleImageUrl) {
+    try {
       const res = await fetch(articleImageUrl, { signal: AbortSignal.timeout(15000) });
       if (res.ok) image = Buffer.from(await res.arrayBuffer());
-    }
-  } catch {}
+    } catch {}
+  }
   const imageBuf = image
     ? await sharp(image).resize(IMAGE_W, IMAGE_H, { fit: "cover" }).toBuffer()
     : await sharp({
@@ -367,9 +415,19 @@ async function main() {
   }
 
   const state = readState();
-  const art = pickLatestUnposted(items, state);
+  let art = pickLatestUnposted(items, state);
+  let imageBufferValidated = null;
+  while (art) {
+    imageBufferValidated = await fetchValidatedImageBuffer(art.imageUrl);
+    if (imageBufferValidated) break;
+    state.skipped_urls = [
+      art.url,
+      ...(Array.isArray(state?.skipped_urls) ? state.skipped_urls : []).filter((u) => u !== art.url),
+    ].slice(0, 5000);
+    art = pickLatestUnposted(items, state);
+  }
   if (!art) {
-    console.log("No new snapshot article to post.");
+    console.log("No new snapshot article with a quality image to post.");
     return;
   }
 
@@ -380,7 +438,7 @@ async function main() {
       ? await shortenUrl(longSiteLink)
       : longSiteLink;
 
-  const card = await generateCard(art.title, art.imageUrl);
+  const card = await generateCard(art.title, art.imageUrl, imageBufferValidated);
   const tg = await postTelegram(art.title, postLink, card);
   console.log("Posted to Telegram.");
 
@@ -447,6 +505,7 @@ async function main() {
     last_posted_url: art.url,
     last_posted_title: art.title,
     posted_urls: [art.url, ...(Array.isArray(state?.posted_urls) ? state.posted_urls : []).filter((u) => u !== art.url)].slice(0, 5000),
+    skipped_urls: (Array.isArray(state?.skipped_urls) ? state.skipped_urls : []).slice(0, 5000),
     updated_at: new Date().toISOString(),
   });
   console.log("Updated social_state.json");
