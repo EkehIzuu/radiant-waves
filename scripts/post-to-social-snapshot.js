@@ -237,11 +237,23 @@ async function postInstagram(caption, imageUrl) {
   const createData = await createRes.json();
   if (createData.error) throw new Error(createData.error.message || "Instagram media create failed");
 
-  const pubParams = new URLSearchParams({ creation_id: createData.id, access_token: token });
-  const pubRes = await fetch(`${graph}/${igUserId}/media_publish`, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: pubParams });
-  const pubData = await pubRes.json();
-  if (pubData.error) throw new Error(pubData.error.message || "Instagram publish failed");
-  return pubData;
+  const creationId = createData.id;
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    const pubParams = new URLSearchParams({ creation_id: creationId, access_token: token });
+    const pubRes = await fetch(`${graph}/${igUserId}/media_publish`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: pubParams,
+    });
+    const pubData = await pubRes.json();
+    if (!pubData.error) return pubData;
+
+    const msg = pubData.error?.message || "Instagram publish failed";
+    const retryable = msg.includes("Media ID is not available");
+    if (!retryable || attempt === 4) throw new Error(msg);
+    await new Promise((resolve) => setTimeout(resolve, 4000 * attempt));
+  }
+  throw new Error("Instagram publish failed");
 }
 
 async function main() {
