@@ -35,6 +35,8 @@ PICKER_VERSION = "v6-nosnap-ai"  # bump marker
 
 # Disk cache (fallback if Firestore quota fails)
 CACHE_PATH = os.path.join(os.path.dirname(__file__), "cache_articles.json")
+SNAPSHOT_PATH = os.path.join(os.path.dirname(__file__), "snapshots", "latest.json.gz")
+DISABLE_FIRESTORE_READS = os.getenv("DISABLE_FIRESTORE_READS", "1") in ("1", "true", "TRUE", "yes", "on")
 
 # Gate the scheduler so it runs in exactly ONE process
 RUN_JOBS = os.getenv("RUN_JOBS", "0") == "1"
@@ -76,6 +78,32 @@ def _read_cache() -> list:
             return json.load(f)
     except Exception:
         return []
+
+def _read_snapshot_local() -> list:
+    """Read local snapshots/latest.json.gz quickly; returns [] on any issue."""
+    try:
+        if not os.path.exists(SNAPSHOT_PATH):
+            return []
+        with gzip.open(SNAPSHOT_PATH, "rt", encoding="utf-8") as f:
+            payload = json.load(f)
+        if isinstance(payload, dict) and isinstance(payload.get("items"), list):
+            return payload["items"]
+        if isinstance(payload, list):
+            return payload
+        return []
+    except Exception:
+        return []
+
+def _read_fast_local_articles() -> list:
+    """
+    Fast local source order:
+    1) disk cache_articles.json
+    2) local snapshot gzip
+    """
+    rows = _read_cache()
+    if rows:
+        return rows
+    return _read_snapshot_local()
 
 def _parse_ts_maybe(v):
     """Accept datetime or ISO string; fallback to epoch."""
@@ -232,6 +260,7 @@ def root():
 # In-memory TTL cache for /articles results
 # =========================================================
 _MEM = {}  # key -> {ts, payload}
+_BOOT_ARTICLES = _read_fast_local_articles()
 
 def _mem_key(feed: str | None, q: str | None) -> str:
     f = (feed or "").strip().lower()
@@ -277,7 +306,7 @@ def list_articles():
         window = FETCH_WINDOW
 
     if cache_only:
-        docs = _read_cache()
+        docs = _read_fast_local_articles()
         resp = jsonify(docs[:limit])
         resp.headers["X-Source"] = "disk"
         return resp
@@ -291,25 +320,29 @@ def list_articles():
     docs = []
     from_cache = False
 
-    try:
-        qref = coll.order_by("ingestedAt", direction=firestore.Query.DESCENDING).limit(window)
-        for _doc in qref.stream(retry=None, timeout=10):
-            d = _doc.to_dict()
-            d["id"] = _doc.id
-            docs.append(d)
-
-        public_rows = [doc_to_public(d) for d in docs]
-        _write_cache(public_rows)
-
-    except ResourceExhausted as e:
-        log.warning("Firestore quota exceeded, serving disk cache: %s", e)
-        docs = _read_cache()
+    if DISABLE_FIRESTORE_READS:
+        docs = list(_BOOT_ARTICLES or _read_fast_local_articles())
         from_cache = True
+    else:
+        try:
+            qref = coll.order_by("ingestedAt", direction=firestore.Query.DESCENDING).limit(window)
+            for _doc in qref.stream(retry=None, timeout=10):
+                d = _doc.to_dict()
+                d["id"] = _doc.id
+                docs.append(d)
 
-    except Exception as e:
-        log.warning("Firestore fetch failed, using disk cache: %s", e)
-        docs = _read_cache()
-        from_cache = True
+            public_rows = [doc_to_public(d) for d in docs]
+            _write_cache(public_rows)
+
+        except ResourceExhausted as e:
+            log.warning("Firestore quota exceeded, serving local cache: %s", e)
+            docs = _read_fast_local_articles()
+            from_cache = True
+
+        except Exception as e:
+            log.warning("Firestore fetch failed, using local cache: %s", e)
+            docs = _read_fast_local_articles()
+            from_cache = True
 
     if feed:
         docs = [d for d in docs if (d.get("feed") or "").lower() == feed.lower()]
@@ -329,7 +362,7 @@ def list_articles():
     _mem_set_articles(feed, q, docs)
 
     resp = jsonify(docs[:limit])
-    resp.headers["X-Source"] = "disk" if from_cache else "firestore"
+    resp.headers["X-Source"] = "snapshot-cache" if from_cache else "firestore"
     return resp
 
 # ----------------- Backend Search (full Firestore or cache) -----------------
@@ -345,20 +378,24 @@ def search_articles():
     docs = []
     from_cache = False
 
-    try:
-        qref = coll.order_by("ingestedAt", direction=firestore.Query.DESCENDING).limit(800)
-        for _doc in qref.stream(retry=None, timeout=10):
-            d = _doc.to_dict()
-            d["id"] = _doc.id
-            docs.append(d)
-    except ResourceExhausted as e:
-        log.warning("search_articles: quota exceeded, falling back to cache: %s", e)
-        docs = _read_cache()
+    if DISABLE_FIRESTORE_READS:
+        docs = list(_BOOT_ARTICLES or _read_fast_local_articles())
         from_cache = True
-    except Exception as e:
-        log.warning("search_articles: fetch failed, falling back to cache: %s", e)
-        docs = _read_cache()
-        from_cache = True
+    else:
+        try:
+            qref = coll.order_by("ingestedAt", direction=firestore.Query.DESCENDING).limit(800)
+            for _doc in qref.stream(retry=None, timeout=10):
+                d = _doc.to_dict()
+                d["id"] = _doc.id
+                docs.append(d)
+        except ResourceExhausted as e:
+            log.warning("search_articles: quota exceeded, falling back to cache: %s", e)
+            docs = _read_fast_local_articles()
+            from_cache = True
+        except Exception as e:
+            log.warning("search_articles: fetch failed, falling back to cache: %s", e)
+            docs = _read_fast_local_articles()
+            from_cache = True
 
     def tl(s): return (s or "").lower()
     results = [
@@ -1053,6 +1090,12 @@ def health():
 # ----------------- Latest (for Zapier) -----------------
 @app.route("/latest", methods=["GET"])
 def latest():
+    if DISABLE_FIRESTORE_READS:
+        docs = list(_BOOT_ARTICLES or _read_fast_local_articles())
+        if docs:
+            return jsonify({"ok": True, "article": docs[0]}), 200
+        return jsonify({"ok": False, "error": "no_articles"}), 404
+
     try:
         qref = coll.order_by("ingestedAt", direction=firestore.Query.DESCENDING).limit(1)
         out = []
@@ -1066,7 +1109,7 @@ def latest():
             return jsonify({"ok": False, "error": "no_articles"}), 404
         return jsonify({"ok": True, "article": out[0]}), 200
     except ResourceExhausted:
-        docs = _read_cache()
+        docs = _read_fast_local_articles()
         if docs:
             return jsonify({"ok": True, "article": docs[0]}), 200
         return jsonify({"ok": False, "error": "quota_exceeded_and_no_cache"}), 503
