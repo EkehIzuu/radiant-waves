@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build-seo": "node tools/build-seo-pages.js",
-    "post-to-social": "node scripts/post-to-social.js"
+    "post-to-social": "node scripts/post-to-social-snapshot.js"
   },
   "engines": {
     "node": ">=18"
