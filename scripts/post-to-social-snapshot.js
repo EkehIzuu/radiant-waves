@@ -105,13 +105,15 @@ function pickLatestUnposted(items, state) {
   const sorted = [...items].sort((a, b) => parseTs(b.ingestedAt || b.publishedAt) - parseTs(a.ingestedAt || a.publishedAt));
   for (const it of sorted) {
     const url = normalizeUrl(it.url || it.link || "");
+    const imageUrl = normalizeUrl(it.imageUrl || it.image || "");
     if (!url) continue;
+    if (!imageUrl) continue;
     if (url === lastUrl) continue;
     return {
       id: it.id || "",
       title: stripHtml(it.title || "Radiant Waves"),
       url,
-      imageUrl: normalizeUrl(it.imageUrl || it.image || ""),
+      imageUrl,
     };
   }
   return null;
@@ -199,6 +201,17 @@ async function getTelegramFileUrl(botToken, sendPhotoBody) {
   return filePath ? `https://api.telegram.org/file/bot${botToken}/${filePath}` : "";
 }
 
+async function uploadToImgbb(imageBuffer, apiKey) {
+  if (!apiKey || !imageBuffer?.length) return "";
+  const form = new FormData();
+  form.append("key", apiKey);
+  form.append("image", new Blob([imageBuffer], { type: "image/png" }), "image.png");
+  const res = await fetch("https://api.imgbb.com/1/upload", { method: "POST", body: form });
+  const data = await res.json();
+  const url = data?.data?.image?.url ?? data?.data?.url;
+  return url && url.startsWith("http") ? url : "";
+}
+
 async function postInstagram(caption, imageUrl) {
   const token = env("FB_PAGE_ACCESS_TOKEN");
   const pageId = env("FB_PAGE_ID", "me");
@@ -266,7 +279,24 @@ async function main() {
       const ig = await postInstagram(`${art.title}\n\n${postLink}`, imageUrlForIg);
       if (ig?.id) console.log("Posted to Instagram. Media id:", ig.id);
     } catch (e) {
-      console.error("Instagram error:", e?.message || e);
+      const firstErr = e?.message || String(e);
+      if (firstErr.includes("Only photo or video can be accepted as media type")) {
+        try {
+          const imgbbKey = env("IMGBB_API_KEY");
+          if (!imgbbKey) throw new Error("IMGBB_API_KEY missing");
+          const tgImgRes = await fetch(imageUrlForIg, { signal: AbortSignal.timeout(15000) });
+          if (!tgImgRes.ok) throw new Error("Failed to download Telegram image for imgbb");
+          const buf = Buffer.from(await tgImgRes.arrayBuffer());
+          const hosted = await uploadToImgbb(buf, imgbbKey);
+          if (!hosted) throw new Error("imgbb upload failed");
+          const ig2 = await postInstagram(`${art.title}\n\n${postLink}`, hosted);
+          if (ig2?.id) console.log("Posted to Instagram (imgbb fallback). Media id:", ig2.id);
+        } catch (e2) {
+          console.error("Instagram error:", e2?.message || e2);
+        }
+      } else {
+        console.error("Instagram error:", firstErr);
+      }
     }
   }
 
