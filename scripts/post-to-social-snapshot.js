@@ -10,9 +10,12 @@ function env(name, fallback = "") {
   return (process.env[name] || fallback).trim();
 }
 
+/** Explicit on: 1 / true / yes. Explicit off: 0 / false / no / off. Empty = ON (so CI works without extra vars). */
 function envEnabled(name) {
   const v = env(name).toLowerCase();
-  return v === "1" || v === "true" || v === "yes";
+  if (v === "0" || v === "false" || v === "no" || v === "off") return false;
+  if (v === "1" || v === "true" || v === "yes") return true;
+  return true; // unset → default on
 }
 
 const GRAPH = "https://graph.facebook.com/v18.0";
@@ -333,6 +336,13 @@ async function main() {
   const message = `${art.title}\n\n${art.url}`;
 
   if (fbToken) {
+    console.log("Meta channels:", {
+      facebook_feed: envEnabled("POST_TO_FACEBOOK"),
+      facebook_story: envEnabled("POST_TO_FACEBOOK_STORY"),
+      ig_story: envEnabled("POST_TO_IG_STORY"),
+      has_telegram_image_url: Boolean(imageUrlForIg),
+    });
+
     if (envEnabled("POST_TO_FACEBOOK")) {
       try {
         const fb = await postToFacebookFeed(pageId, fbToken, message, art.url);

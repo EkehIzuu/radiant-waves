@@ -34,10 +34,10 @@ jobs:
           IG_USER_ID: ${{ secrets.IG_USER_ID }}
           SNAPSHOT_URL: ${{ vars.SNAPSHOT_URL }}
           IMGBB_API_KEY: ${{ secrets.IMGBB_API_KEY }}
-          # Set to 1 in GitHub Actions variables to enable each channel
-          POST_TO_FACEBOOK: ${{ vars.POST_TO_FACEBOOK }}
-          POST_TO_FACEBOOK_STORY: ${{ vars.POST_TO_FACEBOOK_STORY }}
-          POST_TO_IG_STORY: ${{ vars.POST_TO_IG_STORY }}
+          # Default 1 so FB + stories run without repo variables. Set var to 0 to disable.
+          POST_TO_FACEBOOK: ${{ vars.POST_TO_FACEBOOK || '1' }}
+          POST_TO_FACEBOOK_STORY: ${{ vars.POST_TO_FACEBOOK_STORY || '1' }}
+          POST_TO_IG_STORY: ${{ vars.POST_TO_IG_STORY || '1' }}
         run: node scripts/post-to-social-snapshot.js
 
       - name: Save social state back to repo
