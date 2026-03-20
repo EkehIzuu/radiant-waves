@@ -256,6 +256,103 @@ async function postInstagram(caption, imageUrl) {
   throw new Error("Instagram publish failed");
 }
 
+async function resolveIgUserId(token, pageId) {
+  const igUserIdFromEnv = env("IG_USER_ID");
+  if (igUserIdFromEnv) return igUserIdFromEnv;
+  const graph = "https://graph.facebook.com/v18.0";
+  const pageRes = await fetch(
+    `${graph}/${encodeURIComponent(pageId)}?fields=instagram_business_account&access_token=${encodeURIComponent(token)}`
+  );
+  const pageData = await pageRes.json();
+  if (pageData.error) throw new Error(pageData.error.message || "IG page lookup failed");
+  const id = pageData.instagram_business_account?.id || "";
+  if (!id) throw new Error("No Instagram Business account linked.");
+  return id;
+}
+
+async function postInstagramStory(imageUrl) {
+  const token = env("FB_PAGE_ACCESS_TOKEN");
+  const pageId = env("FB_PAGE_ID", "me");
+  if (!token || !imageUrl) return null;
+  const graph = "https://graph.facebook.com/v18.0";
+  const igUserId = await resolveIgUserId(token, pageId);
+
+  const createParams = new URLSearchParams({
+    image_url: imageUrl,
+    media_type: "STORIES",
+    access_token: token,
+  });
+  const createRes = await fetch(`${graph}/${igUserId}/media`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: createParams,
+  });
+  const createData = await createRes.json();
+  if (createData.error) throw new Error(createData.error.message || "Instagram story media create failed");
+
+  const pubParams = new URLSearchParams({ creation_id: createData.id, access_token: token });
+  const pubRes = await fetch(`${graph}/${igUserId}/media_publish`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: pubParams,
+  });
+  const pubData = await pubRes.json();
+  if (pubData.error) throw new Error(pubData.error.message || "Instagram story publish failed");
+  return pubData;
+}
+
+async function postToFacebook(caption, link, imageBuffer) {
+  const token = env("FB_PAGE_ACCESS_TOKEN");
+  const pageId = env("FB_PAGE_ID", "me");
+  if (!token || !imageBuffer?.length) return null;
+  const message = link ? `${caption}\n\n${link}` : caption;
+
+  const form = new FormData();
+  form.append("message", message);
+  form.append("source", new Blob([imageBuffer], { type: "image/png" }), "card.png");
+  form.append("access_token", token);
+  const res = await fetch(`https://graph.facebook.com/v18.0/${pageId}/photos`, {
+    method: "POST",
+    body: form,
+  });
+  const data = await res.json();
+  if (data.error) throw new Error(data.error.message || "Facebook post failed");
+  return data;
+}
+
+async function postFacebookStory(imageBuffer) {
+  const token = env("FB_PAGE_ACCESS_TOKEN");
+  const pageId = env("FB_PAGE_ID", "me");
+  if (!token || !imageBuffer?.length) return null;
+
+  const form = new FormData();
+  form.append("source", new Blob([imageBuffer], { type: "image/png" }), "story.png");
+  form.append("published", "false");
+  form.append("access_token", token);
+  const uploadRes = await fetch(`https://graph.facebook.com/v18.0/${pageId}/photos`, {
+    method: "POST",
+    body: form,
+  });
+  const uploadData = await uploadRes.json();
+  if (uploadData.error) throw new Error(uploadData.error.message || "Facebook story upload failed");
+
+  const photoId = uploadData.id;
+  if (!photoId) throw new Error("No photo id from Facebook upload");
+
+  const storyParams = new URLSearchParams({
+    photo_id: photoId,
+    access_token: token,
+  });
+  const storyRes = await fetch(`https://graph.facebook.com/v18.0/${pageId}/stories`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: storyParams,
+  });
+  const storyData = await storyRes.json();
+  if (storyData.error) throw new Error(storyData.error.message || "Facebook story publish failed");
+  return storyData;
+}
+
 async function main() {
   const items = await loadSnapshotItems();
   if (!items.length) {
@@ -309,6 +406,33 @@ async function main() {
       } else {
         console.error("Instagram error:", firstErr);
       }
+    }
+  }
+
+  if (env("POST_TO_FACEBOOK") === "1" && env("FB_PAGE_ACCESS_TOKEN")) {
+    try {
+      const fb = await postToFacebook(art.title, postLink, card);
+      if (fb?.id) console.log("Posted to Facebook. Post id:", fb.id);
+    } catch (e) {
+      console.error("Facebook error:", e?.message || e);
+    }
+  }
+
+  if (env("POST_TO_FACEBOOK_STORY") === "1" && env("FB_PAGE_ACCESS_TOKEN")) {
+    try {
+      const fbs = await postFacebookStory(card);
+      if (fbs?.id || fbs?.post_id) console.log("Posted to Facebook Story.");
+    } catch (e) {
+      console.error("Facebook Story error:", e?.message || e);
+    }
+  }
+
+  if (env("POST_TO_IG_STORY") === "1" && env("FB_PAGE_ACCESS_TOKEN") && imageUrlForIg) {
+    try {
+      const igs = await postInstagramStory(imageUrlForIg);
+      if (igs?.id) console.log("Posted to Instagram Story. Media id:", igs.id);
+    } catch (e) {
+      console.error("Instagram Story error:", e?.message || e);
     }
   }
 
