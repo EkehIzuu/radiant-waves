@@ -10,6 +10,14 @@ function env(name, fallback = "") {
   return (process.env[name] || fallback).trim();
 }
 
+/** FB / story toggles: unset = ON. Set to 0 / false / no / off to disable. */
+function envSocialEnabled(name) {
+  const v = env(name).toLowerCase();
+  if (v === "0" || v === "false" || v === "no" || v === "off") return false;
+  if (v === "1" || v === "true" || v === "yes") return true;
+  return true;
+}
+
 function stripHtml(str) {
   return String(str || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
 }
@@ -473,7 +481,7 @@ async function main() {
     }
   }
 
-  if (env("POST_TO_FACEBOOK") === "1" && env("FB_PAGE_ACCESS_TOKEN")) {
+  if (envSocialEnabled("POST_TO_FACEBOOK") && env("FB_PAGE_ACCESS_TOKEN")) {
     try {
       const fb = await postToFacebook(art.title, postLink, card);
       if (fb?.id) console.log("Posted to Facebook. Post id:", fb.id);
@@ -482,7 +490,7 @@ async function main() {
     }
   }
 
-  if (env("POST_TO_FACEBOOK_STORY") === "1" && env("FB_PAGE_ACCESS_TOKEN")) {
+  if (envSocialEnabled("POST_TO_FACEBOOK_STORY") && env("FB_PAGE_ACCESS_TOKEN")) {
     try {
       const fbs = await postFacebookStory(card);
       if (fbs?.id || fbs?.post_id) console.log("Posted to Facebook Story.");
@@ -491,7 +499,7 @@ async function main() {
     }
   }
 
-  if (env("POST_TO_IG_STORY") === "1" && env("FB_PAGE_ACCESS_TOKEN") && imageUrlForIg) {
+  if (envSocialEnabled("POST_TO_IG_STORY") && env("FB_PAGE_ACCESS_TOKEN") && imageUrlForIg) {
     try {
       const igs = await postInstagramStory(imageUrlForIg);
       if (igs?.id) console.log("Posted to Instagram Story. Media id:", igs.id);

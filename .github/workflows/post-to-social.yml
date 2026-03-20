@@ -35,9 +35,10 @@ jobs:
           SNAPSHOT_URL: ${{ vars.SNAPSHOT_URL }}
           SITE_URL: ${{ vars.SITE_URL }}
           SHORTEN_LINK: ${{ vars.SHORTEN_LINK }}
-          POST_TO_FACEBOOK: ${{ vars.POST_TO_FACEBOOK }}
-          POST_TO_IG_STORY: ${{ vars.POST_TO_IG_STORY }}
-          POST_TO_FACEBOOK_STORY: ${{ vars.POST_TO_FACEBOOK_STORY }}
+          # Default 1 when variable unset (repo root / Actions). Set var to 0 to disable.
+          POST_TO_FACEBOOK: ${{ vars.POST_TO_FACEBOOK || '1' }}
+          POST_TO_IG_STORY: ${{ vars.POST_TO_IG_STORY || '1' }}
+          POST_TO_FACEBOOK_STORY: ${{ vars.POST_TO_FACEBOOK_STORY || '1' }}
           BITLY_ACCESS_TOKEN: ${{ secrets.BITLY_ACCESS_TOKEN }}
           IMGBB_API_KEY: ${{ secrets.IMGBB_API_KEY }}
         run: node scripts/post-to-social-snapshot.js
