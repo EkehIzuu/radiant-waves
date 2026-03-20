@@ -26,6 +26,12 @@ function writeState(state) {
   fs.writeFileSync(STATE_PATH, JSON.stringify(state, null, 2) + "\n", "utf8");
 }
 
+function getPostedUrlSet(state) {
+  const arr = Array.isArray(state?.posted_urls) ? state.posted_urls : [];
+  const cleaned = arr.filter((u) => typeof u === "string" && /^https?:\/\//i.test(u));
+  return new Set(cleaned);
+}
+
 async function loadSnapshotItems() {
   const snapshotUrl = env("SNAPSHOT_URL");
 
@@ -101,14 +107,14 @@ async function shortenUrl(longUrl) {
 }
 
 function pickLatestUnposted(items, state) {
-  const lastUrl = state?.last_posted_url || "";
+  const postedSet = getPostedUrlSet(state);
   const sorted = [...items].sort((a, b) => parseTs(b.ingestedAt || b.publishedAt) - parseTs(a.ingestedAt || a.publishedAt));
   for (const it of sorted) {
     const url = normalizeUrl(it.url || it.link || "");
     const imageUrl = normalizeUrl(it.imageUrl || it.image || "");
     if (!url) continue;
     if (!imageUrl) continue;
-    if (url === lastUrl) continue;
+    if (postedSet.has(url)) continue;
     return {
       id: it.id || "",
       title: stripHtml(it.title || "Radiant Waves"),
@@ -440,6 +446,7 @@ async function main() {
     ...state,
     last_posted_url: art.url,
     last_posted_title: art.title,
+    posted_urls: [art.url, ...(Array.isArray(state?.posted_urls) ? state.posted_urls : []).filter((u) => u !== art.url)].slice(0, 5000),
     updated_at: new Date().toISOString(),
   });
   console.log("Updated social_state.json");
