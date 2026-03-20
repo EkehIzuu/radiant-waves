@@ -332,11 +332,32 @@ async function resolveIgUserId(token, pageId) {
   return id;
 }
 
+const GRAPH = "https://graph.facebook.com/v18.0";
+
+async function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/** Wait until IG container is ready (feed + stories). */
+async function waitForIgMediaContainer(containerId, token, label = "IG") {
+  for (let i = 0; i < 12; i++) {
+    const res = await fetch(
+      `${GRAPH}/${encodeURIComponent(containerId)}?fields=status_code&access_token=${encodeURIComponent(token)}`
+    );
+    const data = await res.json();
+    if (data.error) throw new Error(data.error.message || `${label} container status failed`);
+    const code = data.status_code;
+    if (code === "FINISHED" || code === "PUBLISHED") return;
+    if (code === "ERROR") throw new Error(`${label} container failed`);
+    // undefined / IN_PROGRESS / EXPIRED — keep polling
+    await sleep(2500);
+  }
+}
+
 async function postInstagramStory(imageUrl) {
   const token = env("FB_PAGE_ACCESS_TOKEN");
   const pageId = env("FB_PAGE_ID", "me");
   if (!token || !imageUrl) return null;
-  const graph = "https://graph.facebook.com/v18.0";
   const igUserId = await resolveIgUserId(token, pageId);
 
   const createParams = new URLSearchParams({
@@ -344,7 +365,7 @@ async function postInstagramStory(imageUrl) {
     media_type: "STORIES",
     access_token: token,
   });
-  const createRes = await fetch(`${graph}/${igUserId}/media`, {
+  const createRes = await fetch(`${GRAPH}/${igUserId}/media`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: createParams,
@@ -352,15 +373,25 @@ async function postInstagramStory(imageUrl) {
   const createData = await createRes.json();
   if (createData.error) throw new Error(createData.error.message || "Instagram story media create failed");
 
-  const pubParams = new URLSearchParams({ creation_id: createData.id, access_token: token });
-  const pubRes = await fetch(`${graph}/${igUserId}/media_publish`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: pubParams,
-  });
-  const pubData = await pubRes.json();
-  if (pubData.error) throw new Error(pubData.error.message || "Instagram story publish failed");
-  return pubData;
+  const creationId = createData.id;
+  await waitForIgMediaContainer(creationId, token, "Instagram Story");
+
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    const pubParams = new URLSearchParams({ creation_id: creationId, access_token: token });
+    const pubRes = await fetch(`${GRAPH}/${igUserId}/media_publish`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: pubParams,
+    });
+    const pubData = await pubRes.json();
+    if (!pubData.error) return pubData;
+
+    const msg = pubData.error?.message || "Instagram story publish failed";
+    const retryable = msg.includes("Media ID is not available");
+    if (!retryable || attempt === 4) throw new Error(msg);
+    await sleep(4000 * attempt);
+  }
+  throw new Error("Instagram story publish failed");
 }
 
 async function postToFacebook(caption, link, imageBuffer) {
@@ -373,12 +404,32 @@ async function postToFacebook(caption, link, imageBuffer) {
   form.append("message", message);
   form.append("source", new Blob([imageBuffer], { type: "image/png" }), "card.png");
   form.append("access_token", token);
-  const res = await fetch(`https://graph.facebook.com/v18.0/${pageId}/photos`, {
+  const res = await fetch(`${GRAPH}/${encodeURIComponent(pageId)}/photos`, {
     method: "POST",
     body: form,
   });
   const data = await res.json();
   if (data.error) throw new Error(data.error.message || "Facebook post failed");
+  return data;
+}
+
+/** Link + message on Page feed (works when photo upload is rejected by Graph API). */
+async function postFacebookFeedLink(caption, link) {
+  const token = env("FB_PAGE_ACCESS_TOKEN");
+  const pageId = env("FB_PAGE_ID", "me");
+  if (!token || !link) return null;
+  const params = new URLSearchParams({
+    message: `${caption}\n\n${link}`.slice(0, 5000),
+    link,
+    access_token: token,
+  });
+  const res = await fetch(`${GRAPH}/${encodeURIComponent(pageId)}/feed`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: params,
+  });
+  const data = await res.json();
+  if (data.error) throw new Error(data.error.message || "Facebook feed post failed");
   return data;
 }
 
@@ -391,7 +442,7 @@ async function postFacebookStory(imageBuffer) {
   form.append("source", new Blob([imageBuffer], { type: "image/png" }), "story.png");
   form.append("published", "false");
   form.append("access_token", token);
-  const uploadRes = await fetch(`https://graph.facebook.com/v18.0/${pageId}/photos`, {
+  const uploadRes = await fetch(`${GRAPH}/${encodeURIComponent(pageId)}/photos`, {
     method: "POST",
     body: form,
   });
@@ -405,7 +456,8 @@ async function postFacebookStory(imageBuffer) {
     photo_id: photoId,
     access_token: token,
   });
-  const storyRes = await fetch(`https://graph.facebook.com/v18.0/${pageId}/stories`, {
+  // Meta Page photo stories edge (not /stories)
+  const storyRes = await fetch(`${GRAPH}/${encodeURIComponent(pageId)}/photo_stories`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: storyParams,
@@ -440,6 +492,11 @@ async function main() {
   }
 
   console.log("Posting from snapshot:", art.title.slice(0, 80));
+  console.log("[social] POST_TO_* env (empty = default on):", {
+    POST_TO_FACEBOOK: env("POST_TO_FACEBOOK") || "(unset)",
+    POST_TO_FACEBOOK_STORY: env("POST_TO_FACEBOOK_STORY") || "(unset)",
+    POST_TO_IG_STORY: env("POST_TO_IG_STORY") || "(unset)",
+  });
   const longSiteLink = buildSiteArticleViewUrl(art.url);
   const postLink =
     (env("SHORTEN_LINK") === "1" || env("SHORTEN_LINK").toLowerCase() === "true")
@@ -487,6 +544,12 @@ async function main() {
       if (fb?.id) console.log("Posted to Facebook. Post id:", fb.id);
     } catch (e) {
       console.error("Facebook error:", e?.message || e);
+      try {
+        const fb2 = await postFacebookFeedLink(art.title, postLink);
+        if (fb2?.id) console.log("Posted to Facebook (link fallback). Post id:", fb2.id);
+      } catch (e2) {
+        console.error("Facebook feed fallback error:", e2?.message || e2);
+      }
     }
   }
 
