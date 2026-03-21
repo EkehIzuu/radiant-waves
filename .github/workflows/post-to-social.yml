@@ -1,6 +1,11 @@
 # Post latest snapshot article to Telegram/Instagram.
 name: Post to social (snapshot)
 
+# One run at a time so social_state.json push/rebase races don't drop posted_urls.
+concurrency:
+  group: post-to-social-${{ github.ref }}
+  cancel-in-progress: false
+
 on:
   schedule:
     # Every 3 hours 30 minutes (UTC)

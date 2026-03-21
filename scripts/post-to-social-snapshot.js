@@ -18,6 +18,8 @@ function envSocialEnabled(name) {
   return true;
 }
 
+const GRAPH = "https://graph.facebook.com/v21.0";
+
 function stripHtml(str) {
   return String(str || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
 }
@@ -124,6 +126,39 @@ function normalizeUrl(raw) {
   }
 }
 
+/** Same article often appears with ?utm_* or trailing slash — dedupe so we don't repost. */
+const TRACKING_QUERY_KEYS = new Set([
+  "utm_source",
+  "utm_medium",
+  "utm_campaign",
+  "utm_term",
+  "utm_content",
+  "fbclid",
+  "gclid",
+  "mc_cid",
+  "mc_eid",
+  "_ga",
+  "igshid",
+]);
+
+function normalizeUrlForDedupe(raw) {
+  const base = normalizeUrl(raw);
+  if (!base) return "";
+  try {
+    const u = new URL(base);
+    u.hash = "";
+    u.hostname = u.hostname.toLowerCase();
+    for (const k of [...u.searchParams.keys()]) {
+      const kl = k.toLowerCase();
+      if (kl.startsWith("utm_") || TRACKING_QUERY_KEYS.has(kl)) u.searchParams.delete(k);
+    }
+    if (u.pathname.length > 1 && u.pathname.endsWith("/")) u.pathname = u.pathname.slice(0, -1);
+    return u.toString();
+  } catch {
+    return base;
+  }
+}
+
 function buildSiteArticleViewUrl(sourceUrl) {
   const site = env("SITE_URL", "https://radiant-waves.com.ng").replace(/\/+$/, "");
   return `${site}/#/article?u=${encodeURIComponent(sourceUrl)}`;
@@ -164,7 +199,7 @@ function pickLatestUnposted(items, state) {
   const skippedSet = getSkippedUrlSet(state);
   const sorted = [...items].sort((a, b) => parseTs(b.ingestedAt || b.publishedAt) - parseTs(a.ingestedAt || a.publishedAt));
   for (const it of sorted) {
-    const url = normalizeUrl(it.url || it.link || "");
+    const url = normalizeUrlForDedupe(it.url || it.link || "");
     const imageUrl = normalizeUrl(it.imageUrl || it.image || "");
     if (!url) continue;
     if (!imageUrl) continue;
@@ -280,7 +315,7 @@ async function postInstagram(caption, imageUrl) {
   const igUserIdFromEnv = env("IG_USER_ID");
   if (!token || !imageUrl) return null;
 
-  const graph = "https://graph.facebook.com/v18.0";
+  const graph = GRAPH;
   let igUserId = igUserIdFromEnv;
   if (!igUserId) {
     const pageRes = await fetch(`${graph}/${encodeURIComponent(pageId)}?fields=instagram_business_account&access_token=${encodeURIComponent(token)}`);
@@ -321,9 +356,8 @@ async function postInstagram(caption, imageUrl) {
 async function resolveIgUserId(token, pageId) {
   const igUserIdFromEnv = env("IG_USER_ID");
   if (igUserIdFromEnv) return igUserIdFromEnv;
-  const graph = "https://graph.facebook.com/v18.0";
   const pageRes = await fetch(
-    `${graph}/${encodeURIComponent(pageId)}?fields=instagram_business_account&access_token=${encodeURIComponent(token)}`
+    `${GRAPH}/${encodeURIComponent(pageId)}?fields=instagram_business_account&access_token=${encodeURIComponent(token)}`
   );
   const pageData = await pageRes.json();
   if (pageData.error) throw new Error(pageData.error.message || "IG page lookup failed");
@@ -331,8 +365,6 @@ async function resolveIgUserId(token, pageId) {
   if (!id) throw new Error("No Instagram Business account linked.");
   return id;
 }
-
-const GRAPH = "https://graph.facebook.com/v18.0";
 
 async function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -394,6 +426,14 @@ async function postInstagramStory(imageUrl) {
   throw new Error("Instagram story publish failed");
 }
 
+function appendPngUpload(form, fieldName, buffer, filename) {
+  if (typeof File !== "undefined") {
+    form.append(fieldName, new File([buffer], filename, { type: "image/png" }));
+  } else {
+    form.append(fieldName, new Blob([buffer], { type: "image/png" }), filename);
+  }
+}
+
 async function postToFacebook(caption, link, imageBuffer) {
   const token = env("FB_PAGE_ACCESS_TOKEN");
   const pageId = env("FB_PAGE_ID", "me");
@@ -402,14 +442,22 @@ async function postToFacebook(caption, link, imageBuffer) {
 
   const form = new FormData();
   form.append("message", message);
-  form.append("source", new Blob([imageBuffer], { type: "image/png" }), "card.png");
+  form.append("published", "true");
+  appendPngUpload(form, "source", imageBuffer, "card.png");
   form.append("access_token", token);
   const res = await fetch(`${GRAPH}/${encodeURIComponent(pageId)}/photos`, {
     method: "POST",
     body: form,
   });
   const data = await res.json();
-  if (data.error) throw new Error(data.error.message || "Facebook post failed");
+  if (data.error) {
+    const msg = data.error.message || "Facebook post failed";
+    if (String(msg).includes("(#200)") || String(msg).toLowerCase().includes("permission"))
+      console.error(
+        "[facebook] Token may lack Page publishing. Re-generate a Page token with pages_manage_posts + pages_read_engagement."
+      );
+    throw new Error(msg);
+  }
   return data;
 }
 
@@ -439,7 +487,7 @@ async function postFacebookStory(imageBuffer) {
   if (!token || !imageBuffer?.length) return null;
 
   const form = new FormData();
-  form.append("source", new Blob([imageBuffer], { type: "image/png" }), "story.png");
+  appendPngUpload(form, "source", imageBuffer, "story.png");
   form.append("published", "false");
   form.append("access_token", token);
   const uploadRes = await fetch(`${GRAPH}/${encodeURIComponent(pageId)}/photos`, {
@@ -463,7 +511,48 @@ async function postFacebookStory(imageBuffer) {
     body: storyParams,
   });
   const storyData = await storyRes.json();
-  if (storyData.error) throw new Error(storyData.error.message || "Facebook story publish failed");
+  if (storyData.error) {
+    const msg = storyData.error.message || "Facebook story publish failed";
+    if (String(msg).includes("(#200)") || String(msg).toLowerCase().includes("permission"))
+      console.error(
+        "[facebook story] Needs Page story permission + publish. Check Meta app (pages_manage_posts) and Page Stories API access."
+      );
+    throw new Error(msg);
+  }
+  return storyData;
+}
+
+/** When multipart upload fails, Meta can still fetch a public HTTPS image URL (e.g. imgbb). */
+async function postFacebookStoryFromPublicUrl(imageUrl) {
+  const token = env("FB_PAGE_ACCESS_TOKEN");
+  const pageId = env("FB_PAGE_ID", "me");
+  if (!token || !imageUrl) return null;
+  const uploadParams = new URLSearchParams({
+    url: imageUrl,
+    published: "false",
+    access_token: token,
+  });
+  const uploadRes = await fetch(`${GRAPH}/${encodeURIComponent(pageId)}/photos`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: uploadParams,
+  });
+  const uploadData = await uploadRes.json();
+  if (uploadData.error) throw new Error(uploadData.error.message || "Facebook story upload (url) failed");
+  const photoId = uploadData.id;
+  if (!photoId) throw new Error("No photo id from Facebook URL upload");
+
+  const storyParams = new URLSearchParams({
+    photo_id: photoId,
+    access_token: token,
+  });
+  const storyRes = await fetch(`${GRAPH}/${encodeURIComponent(pageId)}/photo_stories`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: storyParams,
+  });
+  const storyData = await storyRes.json();
+  if (storyData.error) throw new Error(storyData.error.message || "Facebook story publish (url) failed");
   return storyData;
 }
 
@@ -480,9 +569,10 @@ async function main() {
   while (art) {
     imageBufferValidated = await fetchValidatedImageBuffer(art.imageUrl);
     if (imageBufferValidated) break;
+    const skipKey = normalizeUrlForDedupe(art.url);
     state.skipped_urls = [
-      art.url,
-      ...(Array.isArray(state?.skipped_urls) ? state.skipped_urls : []).filter((u) => u !== art.url),
+      skipKey,
+      ...(Array.isArray(state?.skipped_urls) ? state.skipped_urls : []).filter((u) => normalizeUrlForDedupe(u) !== skipKey),
     ].slice(0, 5000);
     art = pickLatestUnposted(items, state);
   }
@@ -512,6 +602,44 @@ async function main() {
     imageUrlForIg = await getTelegramFileUrl(env("TELEGRAM_BOT_TOKEN"), tg);
   } catch {}
 
+  // Facebook feed + Page story use the card image (same token as IG but different permissions — log errors).
+  if (envSocialEnabled("POST_TO_FACEBOOK") && env("FB_PAGE_ACCESS_TOKEN")) {
+    console.log("[social] Attempting Facebook Page post (photo or link fallback)…");
+    try {
+      const fb = await postToFacebook(art.title, postLink, card);
+      if (fb?.id) console.log("Posted to Facebook. Post id:", fb.id);
+    } catch (e) {
+      console.error("Facebook error:", e?.message || e);
+      try {
+        const fb2 = await postFacebookFeedLink(art.title, postLink);
+        if (fb2?.id) console.log("Posted to Facebook (link fallback). Post id:", fb2.id);
+      } catch (e2) {
+        console.error("Facebook feed fallback error:", e2?.message || e2);
+      }
+    }
+  }
+
+  if (envSocialEnabled("POST_TO_FACEBOOK_STORY") && env("FB_PAGE_ACCESS_TOKEN")) {
+    console.log("[social] Attempting Facebook Page photo story…");
+    try {
+      const fbs = await postFacebookStory(card);
+      if (fbs?.id || fbs?.post_id) console.log("Posted to Facebook Story.");
+    } catch (e) {
+      console.error("Facebook Story error:", e?.message || e);
+      const imgbbKey = env("IMGBB_API_KEY");
+      if (imgbbKey) {
+        try {
+          const hosted = await uploadToImgbb(card, imgbbKey);
+          if (!hosted) throw new Error("imgbb upload failed");
+          const fbs2 = await postFacebookStoryFromPublicUrl(hosted);
+          if (fbs2?.id || fbs2?.post_id) console.log("Posted to Facebook Story (imgbb URL).");
+        } catch (e2) {
+          console.error("Facebook Story imgbb fallback:", e2?.message || e2);
+        }
+      }
+    }
+  }
+
   if (env("FB_PAGE_ACCESS_TOKEN") && imageUrlForIg) {
     try {
       const ig = await postInstagram(`${art.title}\n\n${postLink}`, imageUrlForIg);
@@ -538,44 +666,39 @@ async function main() {
     }
   }
 
-  if (envSocialEnabled("POST_TO_FACEBOOK") && env("FB_PAGE_ACCESS_TOKEN")) {
-    try {
-      const fb = await postToFacebook(art.title, postLink, card);
-      if (fb?.id) console.log("Posted to Facebook. Post id:", fb.id);
-    } catch (e) {
-      console.error("Facebook error:", e?.message || e);
-      try {
-        const fb2 = await postFacebookFeedLink(art.title, postLink);
-        if (fb2?.id) console.log("Posted to Facebook (link fallback). Post id:", fb2.id);
-      } catch (e2) {
-        console.error("Facebook feed fallback error:", e2?.message || e2);
-      }
-    }
-  }
-
-  if (envSocialEnabled("POST_TO_FACEBOOK_STORY") && env("FB_PAGE_ACCESS_TOKEN")) {
-    try {
-      const fbs = await postFacebookStory(card);
-      if (fbs?.id || fbs?.post_id) console.log("Posted to Facebook Story.");
-    } catch (e) {
-      console.error("Facebook Story error:", e?.message || e);
-    }
-  }
-
   if (envSocialEnabled("POST_TO_IG_STORY") && env("FB_PAGE_ACCESS_TOKEN") && imageUrlForIg) {
+    console.log("[social] Attempting Instagram Story…");
     try {
       const igs = await postInstagramStory(imageUrlForIg);
       if (igs?.id) console.log("Posted to Instagram Story. Media id:", igs.id);
     } catch (e) {
       console.error("Instagram Story error:", e?.message || e);
+      const imgbbKey = env("IMGBB_API_KEY");
+      if (imgbbKey) {
+        try {
+          const hosted = await uploadToImgbb(card, imgbbKey);
+          if (!hosted) throw new Error("imgbb upload failed");
+          const igs2 = await postInstagramStory(hosted);
+          if (igs2?.id) console.log("Posted to Instagram Story (imgbb). Media id:", igs2.id);
+        } catch (e2) {
+          console.error("Instagram Story imgbb fallback:", e2?.message || e2);
+        }
+      }
     }
   }
 
+  const postedKey = normalizeUrlForDedupe(art.url);
+  const prevPosted = Array.isArray(state?.posted_urls) ? state.posted_urls : [];
+  const mergedPosted = [postedKey, ...prevPosted.map((u) => normalizeUrlForDedupe(u)).filter((u) => u && u !== postedKey)].slice(
+    0,
+    5000
+  );
+
   writeState({
     ...state,
-    last_posted_url: art.url,
+    last_posted_url: postedKey,
     last_posted_title: art.title,
-    posted_urls: [art.url, ...(Array.isArray(state?.posted_urls) ? state.posted_urls : []).filter((u) => u !== art.url)].slice(0, 5000),
+    posted_urls: mergedPosted,
     skipped_urls: (Array.isArray(state?.skipped_urls) ? state.skipped_urls : []).slice(0, 5000),
     updated_at: new Date().toISOString(),
   });
