@@ -319,6 +319,69 @@ async function buildStoryJpegFromCard(cardPngBuffer) {
     .toBuffer();
 }
 
+/**
+ * User tokens hit /me/feed as the USER → publish_actions errors.
+ * Resolve a Page access token: GET /{page-id}?fields=access_token or GET /me/accounts.
+ */
+async function ensurePageAccessToken() {
+  const raw = env("FB_PAGE_ACCESS_TOKEN");
+  if (!raw) return;
+
+  let pageId = env("FB_PAGE_ID", "me").trim();
+
+  if (!pageId || pageId === "me") {
+    const res = await fetch(
+      `${GRAPH}/me/accounts?fields=access_token,id,name&limit=25&access_token=${encodeURIComponent(raw)}`
+    );
+    const data = await res.json();
+    if (data.error) {
+      console.warn("[facebook] /me/accounts failed:", data.error.message);
+      return;
+    }
+    const pages = data.data || [];
+    if (pages.length === 0) {
+      console.warn("[facebook] No Pages returned. Grant pages_show_list and connect a Facebook Page.");
+      return;
+    }
+    if (pages.length > 1) {
+      console.warn(
+        "[facebook] Multiple Pages — set FB_PAGE_ID in secrets to the numeric id you want. Found:",
+        pages.map((p) => `${p.name} (${p.id})`).join(" | ")
+      );
+      return;
+    }
+    process.env.FB_PAGE_ID = String(pages[0].id);
+    process.env.FB_PAGE_ACCESS_TOKEN = pages[0].access_token;
+    console.log("[facebook] Single Page linked — using:", pages[0].name, "id", pages[0].id);
+    return;
+  }
+
+  const direct = await fetch(
+    `${GRAPH}/${encodeURIComponent(pageId)}?fields=access_token&access_token=${encodeURIComponent(raw)}`
+  );
+  const d1 = await direct.json();
+  if (!d1.error && d1.access_token) {
+    if (d1.access_token !== raw) {
+      console.log("[facebook] Resolved Page access token via GET /{page-id}?fields=access_token");
+    }
+    process.env.FB_PAGE_ACCESS_TOKEN = d1.access_token;
+    return;
+  }
+
+  const res2 = await fetch(
+    `${GRAPH}/me/accounts?fields=access_token,id,name&limit=25&access_token=${encodeURIComponent(raw)}`
+  );
+  const data2 = await res2.json();
+  const match = data2.data?.find((p) => String(p.id) === String(pageId));
+  if (match?.access_token) {
+    process.env.FB_PAGE_ACCESS_TOKEN = match.access_token;
+    console.log("[facebook] Matched Page token from /me/accounts for:", match.name, match.id);
+    return;
+  }
+
+  if (d1.error) console.warn("[facebook] Page token resolve failed:", d1.error.message);
+}
+
 /** Log who the token is (Page vs user) — helps fix "must post as page itself". */
 async function logFacebookTokenIdentity(token) {
   try {
@@ -414,10 +477,28 @@ async function waitForIgMediaContainer(containerId, token, label = "IG") {
   }
 }
 
+async function verifyHttpsImageUrlForInstagram(imageUrl) {
+  if (!imageUrl || !/^https:\/\//i.test(imageUrl)) {
+    throw new Error("Instagram Stories require a public HTTPS image_url");
+  }
+  const res = await fetch(imageUrl, {
+    method: "GET",
+    signal: AbortSignal.timeout(15000),
+    redirect: "follow",
+    headers: { "User-Agent": "RadiantWaves/1.0 (Social Bot)" },
+  });
+  if (!res.ok) throw new Error(`Story image_url returned HTTP ${res.status}`);
+  const ct = (res.headers.get("content-type") || "").toLowerCase();
+  if (!ct.startsWith("image/")) {
+    throw new Error(`Story image_url must be an image (got Content-Type: ${ct || "unknown"})`);
+  }
+}
+
 async function postInstagramStory(imageUrl) {
   const token = env("FB_PAGE_ACCESS_TOKEN");
   const pageId = env("FB_PAGE_ID", "me");
   if (!token || !imageUrl) return null;
+  await verifyHttpsImageUrlForInstagram(imageUrl);
   const igUserId = await resolveIgUserId(token, pageId);
 
   const createParams = new URLSearchParams({
@@ -431,7 +512,12 @@ async function postInstagramStory(imageUrl) {
     body: createParams,
   });
   const createData = await createRes.json();
-  if (createData.error) throw new Error(createData.error.message || "Instagram story media create failed");
+  if (createData.error) {
+    const err = createData.error;
+    throw new Error(
+      err.message || "Instagram story media create failed" + (err.code ? ` (code ${err.code})` : "")
+    );
+  }
 
   const creationId = createData.id;
   await waitForIgMediaContainer(creationId, token, "Instagram Story");
@@ -638,6 +724,7 @@ async function main() {
     imageUrlForIg = await getTelegramFileUrl(env("TELEGRAM_BOT_TOKEN"), tg);
   } catch {}
 
+  await ensurePageAccessToken();
   const fbToken = env("FB_PAGE_ACCESS_TOKEN");
   if (fbToken) {
     await logFacebookTokenIdentity(fbToken);
