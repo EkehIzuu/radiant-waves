@@ -36,7 +36,10 @@ PICKER_VERSION = "v6-nosnap-ai"  # bump marker
 # Disk cache (fallback if Firestore quota fails)
 CACHE_PATH = os.path.join(os.path.dirname(__file__), "cache_articles.json")
 SNAPSHOT_PATH = os.path.join(os.path.dirname(__file__), "snapshots", "latest.json.gz")
-DISABLE_FIRESTORE_READS = os.getenv("DISABLE_FIRESTORE_READS", "1") in ("1", "true", "TRUE", "yes", "on")
+# 1 = never hit Firestore (browse + search use disk only; emergency / offline dev).
+DISABLE_FIRESTORE_READS = os.getenv("DISABLE_FIRESTORE_READS", "0") in ("1", "true", "TRUE", "yes", "on")
+# 1 = /articles without ?q= uses snapshots/cache only; ?q= search still uses Firestore when DISABLE_FIRESTORE_READS=0.
+SERVE_BROWSE_FROM_SNAPSHOT = os.getenv("SERVE_BROWSE_FROM_SNAPSHOT", "1") in ("1", "true", "TRUE", "yes", "on")
 
 # Gate the scheduler so it runs in exactly ONE process
 RUN_JOBS = os.getenv("RUN_JOBS", "0") == "1"
@@ -104,6 +107,17 @@ def _read_fast_local_articles() -> list:
     if rows:
         return rows
     return _read_snapshot_local()
+
+
+def _article_visible_on_feed(d: dict) -> bool:
+    """Firestore/snapshot: hide from home/feed when archived or hiddenFromFeed (search still returns these)."""
+    if not isinstance(d, dict):
+        return True
+    if d.get("hiddenFromFeed") is True:
+        return False
+    if d.get("archived") is True:
+        return False
+    return True
 
 def _parse_ts_maybe(v):
     """Accept datetime or ISO string; fallback to epoch."""
@@ -320,7 +334,10 @@ def list_articles():
     docs = []
     from_cache = False
 
-    if DISABLE_FIRESTORE_READS:
+    # Browse (no text search): snapshot/cache by default to save Firestore reads. Search (?q=) uses Firestore below.
+    use_local_browse = DISABLE_FIRESTORE_READS or ((not is_search) and SERVE_BROWSE_FROM_SNAPSHOT)
+
+    if use_local_browse:
         docs = list(_BOOT_ARTICLES or _read_fast_local_articles())
         from_cache = True
     else:
@@ -346,6 +363,8 @@ def list_articles():
 
     if feed:
         docs = [d for d in docs if (d.get("feed") or "").lower() == feed.lower()]
+    if not is_search:
+        docs = [d for d in docs if _article_visible_on_feed(d)]
     if q:
         tl = lambda s: (s or "").lower()
         docs = [

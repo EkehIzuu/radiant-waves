@@ -915,7 +915,7 @@ async function loadHome() {
     else setStaleUI(false);
   } else {
     const lists = await Promise.all(
-      HOME_FEEDS.map(feed => fetchJSONRelaxed(`${API_BASE}/articles?feed=${feed}&limit=${per}`, []))
+      HOME_FEEDS.map((feed) => fetchJSONRelaxed(`${API_BASE}/articles?feed=${feed}&limit=${per}`, []))
     );
     all = lists.flat();
     setStaleUI(!navigator.onLine, "live fetch failed");
