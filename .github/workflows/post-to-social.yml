@@ -41,6 +41,8 @@ jobs:
           SITE_URL: ${{ vars.SITE_URL }}
           SHORTEN_LINK: ${{ vars.SHORTEN_LINK }}
           # Default 1 when variable unset (repo root / Actions). Set var to 0 to disable.
+          # Optional: set POST_TO_FACEBOOK_PHOTO=1 to also upload a photo to the Page (needs Page token).
+          POST_TO_FACEBOOK_PHOTO: ${{ vars.POST_TO_FACEBOOK_PHOTO }}
           POST_TO_FACEBOOK: ${{ vars.POST_TO_FACEBOOK || '1' }}
           POST_TO_IG_STORY: ${{ vars.POST_TO_IG_STORY || '1' }}
           POST_TO_FACEBOOK_STORY: ${{ vars.POST_TO_FACEBOOK_STORY || '1' }}

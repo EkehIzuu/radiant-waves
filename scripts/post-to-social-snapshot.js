@@ -298,15 +298,43 @@ async function getTelegramFileUrl(botToken, sendPhotoBody) {
   return filePath ? `https://api.telegram.org/file/bot${botToken}/${filePath}` : "";
 }
 
-async function uploadToImgbb(imageBuffer, apiKey) {
+async function uploadToImgbb(imageBuffer, apiKey, opts = {}) {
   if (!apiKey || !imageBuffer?.length) return "";
+  const name = opts.name || "image.png";
+  const mime = opts.mime || "image/png";
   const form = new FormData();
   form.append("key", apiKey);
-  form.append("image", new Blob([imageBuffer], { type: "image/png" }), "image.png");
+  form.append("image", new Blob([imageBuffer], { type: mime }), name);
   const res = await fetch("https://api.imgbb.com/1/upload", { method: "POST", body: form });
   const data = await res.json();
   const url = data?.data?.image?.url ?? data?.data?.url;
   return url && url.startsWith("http") ? url : "";
+}
+
+/** IG Stories + FB Stories expect photo/video; 9:16 JPEG is most reliable. */
+async function buildStoryJpegFromCard(cardPngBuffer) {
+  return sharp(cardPngBuffer)
+    .resize(1080, 1920, { fit: "cover", position: "centre" })
+    .jpeg({ quality: 88, mozjpeg: true })
+    .toBuffer();
+}
+
+/** Log who the token is (Page vs user) — helps fix "must post as page itself". */
+async function logFacebookTokenIdentity(token) {
+  try {
+    const res = await fetch(`${GRAPH}/me?fields=id,name,category&access_token=${encodeURIComponent(token)}`);
+    const d = await res.json();
+    if (d.error) {
+      console.warn("[facebook] Could not read token /me:", d.error.message);
+      return;
+    }
+    console.log("[facebook] access token /me:", { id: d.id, name: d.name, category: d.category || "(none)" });
+    console.log(
+      "[facebook] Tip: use a Page access token + numeric FB_PAGE_ID. User tokens cause publish_actions / 'as the page itself' errors."
+    );
+  } catch (e) {
+    console.warn("[facebook] Token check failed:", e?.message || e);
+  }
 }
 
 async function postInstagram(caption, imageUrl) {
@@ -477,7 +505,15 @@ async function postFacebookFeedLink(caption, link) {
     body: params,
   });
   const data = await res.json();
-  if (data.error) throw new Error(data.error.message || "Facebook feed post failed");
+  if (data.error) {
+    const msg = data.error.message || "Facebook feed post failed";
+    if (String(msg).includes("publish_actions")) {
+      console.error(
+        "[facebook] /feed failed: use Graph API Explorer → Get Page Access Token for your Page, put it in FB_PAGE_ACCESS_TOKEN, and set FB_PAGE_ID to the numeric Page id."
+      );
+    }
+    throw new Error(msg);
+  }
   return data;
 }
 
@@ -602,45 +638,72 @@ async function main() {
     imageUrlForIg = await getTelegramFileUrl(env("TELEGRAM_BOT_TOKEN"), tg);
   } catch {}
 
-  // Facebook feed + Page story use the card image (same token as IG but different permissions — log errors).
-  if (envSocialEnabled("POST_TO_FACEBOOK") && env("FB_PAGE_ACCESS_TOKEN")) {
-    console.log("[social] Attempting Facebook Page post (photo or link fallback)…");
+  const fbToken = env("FB_PAGE_ACCESS_TOKEN");
+  if (fbToken) {
+    await logFacebookTokenIdentity(fbToken);
+  }
+
+  // Facebook: use /feed (link + message) first — /photos triggers deprecated publish_actions on user tokens.
+  if (envSocialEnabled("POST_TO_FACEBOOK") && fbToken) {
+    console.log("[social] Facebook Page feed (link post)…");
     try {
-      const fb = await postToFacebook(art.title, postLink, card);
-      if (fb?.id) console.log("Posted to Facebook. Post id:", fb.id);
+      const fb = await postFacebookFeedLink(art.title, postLink);
+      if (fb?.id) console.log("Posted to Facebook (feed). Post id:", fb.id);
     } catch (e) {
       console.error("Facebook error:", e?.message || e);
+    }
+    if (env("POST_TO_FACEBOOK_PHOTO") === "1") {
       try {
-        const fb2 = await postFacebookFeedLink(art.title, postLink);
-        if (fb2?.id) console.log("Posted to Facebook (link fallback). Post id:", fb2.id);
-      } catch (e2) {
-        console.error("Facebook feed fallback error:", e2?.message || e2);
+        const fbPhoto = await postToFacebook(art.title, postLink, card);
+        if (fbPhoto?.id) console.log("Posted to Facebook (photo). Post id:", fbPhoto.id);
+      } catch (e) {
+        console.error("Facebook photo error:", e?.message || e);
       }
     }
   }
 
-  if (envSocialEnabled("POST_TO_FACEBOOK_STORY") && env("FB_PAGE_ACCESS_TOKEN")) {
-    console.log("[social] Attempting Facebook Page photo story…");
-    try {
-      const fbs = await postFacebookStory(card);
-      if (fbs?.id || fbs?.post_id) console.log("Posted to Facebook Story.");
-    } catch (e) {
-      console.error("Facebook Story error:", e?.message || e);
-      const imgbbKey = env("IMGBB_API_KEY");
-      if (imgbbKey) {
-        try {
-          const hosted = await uploadToImgbb(card, imgbbKey);
-          if (!hosted) throw new Error("imgbb upload failed");
-          const fbs2 = await postFacebookStoryFromPublicUrl(hosted);
-          if (fbs2?.id || fbs2?.post_id) console.log("Posted to Facebook Story (imgbb URL).");
-        } catch (e2) {
-          console.error("Facebook Story imgbb fallback:", e2?.message || e2);
+  // FB Story: prefer public JPEG URL (Page token + imgbb); multipart unpublished needs true Page token.
+  if (envSocialEnabled("POST_TO_FACEBOOK_STORY") && fbToken) {
+    console.log("[social] Facebook Page story…");
+    const imgbbKey = env("IMGBB_API_KEY");
+    let fbStoryOk = false;
+    if (imgbbKey) {
+      try {
+        const jpg = await buildStoryJpegFromCard(card);
+        const hosted = await uploadToImgbb(jpg, imgbbKey, { name: "fb-story.jpg", mime: "image/jpeg" });
+        if (hosted) {
+          const fbs = await postFacebookStoryFromPublicUrl(hosted);
+          if (fbs?.id || fbs?.post_id) {
+            console.log("Posted to Facebook Story (JPEG URL).");
+            fbStoryOk = true;
+          }
+        }
+      } catch (e) {
+        console.error("Facebook Story (JPEG URL) error:", e?.message || e);
+      }
+    }
+    if (!fbStoryOk) {
+      try {
+        const fbs2 = await postFacebookStory(card);
+        if (fbs2?.id || fbs2?.post_id) console.log("Posted to Facebook Story (multipart).");
+      } catch (e) {
+        console.error("Facebook Story error:", e?.message || e);
+        if (imgbbKey) {
+          try {
+            const hosted = await uploadToImgbb(card, imgbbKey);
+            if (hosted) {
+              const fbs3 = await postFacebookStoryFromPublicUrl(hosted);
+              if (fbs3?.id || fbs3?.post_id) console.log("Posted to Facebook Story (PNG URL fallback).");
+            }
+          } catch (e2) {
+            console.error("Facebook Story PNG URL fallback:", e2?.message || e2);
+          }
         }
       }
     }
   }
 
-  if (env("FB_PAGE_ACCESS_TOKEN") && imageUrlForIg) {
+  if (fbToken && imageUrlForIg) {
     try {
       const ig = await postInstagram(`${art.title}\n\n${postLink}`, imageUrlForIg);
       if (ig?.id) console.log("Posted to Instagram. Media id:", ig.id);
@@ -666,24 +729,25 @@ async function main() {
     }
   }
 
-  if (envSocialEnabled("POST_TO_IG_STORY") && env("FB_PAGE_ACCESS_TOKEN") && imageUrlForIg) {
-    console.log("[social] Attempting Instagram Story…");
+  if (envSocialEnabled("POST_TO_IG_STORY") && fbToken) {
+    console.log("[social] Instagram Story (1080×1920 JPEG via imgbb when set)…");
+    const imgbbKey = env("IMGBB_API_KEY");
     try {
-      const igs = await postInstagramStory(imageUrlForIg);
-      if (igs?.id) console.log("Posted to Instagram Story. Media id:", igs.id);
+      if (imgbbKey) {
+        const jpg = await buildStoryJpegFromCard(card);
+        const hosted = await uploadToImgbb(jpg, imgbbKey, { name: "ig-story.jpg", mime: "image/jpeg" });
+        if (!hosted) throw new Error("imgbb upload failed");
+        const igs = await postInstagramStory(hosted);
+        if (igs?.id) console.log("Posted to Instagram Story. Media id:", igs.id);
+      } else if (imageUrlForIg) {
+        console.warn("[IG Story] No IMGBB_API_KEY — trying Telegram URL (often fails for STORIES).");
+        const igs = await postInstagramStory(imageUrlForIg);
+        if (igs?.id) console.log("Posted to Instagram Story. Media id:", igs.id);
+      } else {
+        console.warn("[IG Story] Skipped: set IMGBB_API_KEY for reliable Stories, or ensure Telegram image URL exists.");
+      }
     } catch (e) {
       console.error("Instagram Story error:", e?.message || e);
-      const imgbbKey = env("IMGBB_API_KEY");
-      if (imgbbKey) {
-        try {
-          const hosted = await uploadToImgbb(card, imgbbKey);
-          if (!hosted) throw new Error("imgbb upload failed");
-          const igs2 = await postInstagramStory(hosted);
-          if (igs2?.id) console.log("Posted to Instagram Story (imgbb). Media id:", igs2.id);
-        } catch (e2) {
-          console.error("Instagram Story imgbb fallback:", e2?.message || e2);
-        }
-      }
     }
   }
 
