@@ -205,6 +205,8 @@ function pickLatestUnposted(items, state) {
     if (!imageUrl) continue;
     if (isLowQualityImageUrl(imageUrl)) continue;
     if (postedSet.has(url)) continue;
+    const siteArticleView = normalizeUrlForDedupe(buildSiteArticleViewUrl(url));
+    if (siteArticleView && postedSet.has(siteArticleView)) continue;
     if (skippedSet.has(url)) continue;
     return {
       id: it.id || "",
@@ -575,7 +577,7 @@ async function postToFacebook(caption, link, imageBuffer) {
   return data;
 }
 
-/** Link + message on Page feed (works when photo upload is rejected by Graph API). */
+/** Link preview uses your site's og:image (often the logo). Prefer postToFacebook (photo) instead. */
 async function postFacebookFeedLink(caption, link) {
   const token = env("FB_PAGE_ACCESS_TOKEN");
   const pageId = env("FB_PAGE_ID", "me");
@@ -600,6 +602,25 @@ async function postFacebookFeedLink(caption, link) {
     }
     throw new Error(msg);
   }
+  return data;
+}
+
+/** Message + URL in text only — no `link` param, so FB won't scrape og:image (logo). */
+async function postFacebookFeedTextOnly(caption, link) {
+  const token = env("FB_PAGE_ACCESS_TOKEN");
+  const pageId = env("FB_PAGE_ID", "me");
+  if (!token || !link) return null;
+  const params = new URLSearchParams({
+    message: `${caption}\n\n${link}`.slice(0, 5000),
+    access_token: token,
+  });
+  const res = await fetch(`${GRAPH}/${encodeURIComponent(pageId)}/feed`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: params,
+  });
+  const data = await res.json();
+  if (data.error) throw new Error(data.error.message || "Facebook feed text post failed");
   return data;
 }
 
@@ -730,21 +751,27 @@ async function main() {
     await logFacebookTokenIdentity(fbToken);
   }
 
-  // Facebook: use /feed (link + message) first — /photos triggers deprecated publish_actions on user tokens.
+  // Facebook feed: photo = postcard. Link-only feed scrapes your site og:image → logo.
   if (envSocialEnabled("POST_TO_FACEBOOK") && fbToken) {
-    console.log("[social] Facebook Page feed (link post)…");
+    console.log("[social] Facebook Page feed (postcard photo)…");
     try {
-      const fb = await postFacebookFeedLink(art.title, postLink);
-      if (fb?.id) console.log("Posted to Facebook (feed). Post id:", fb.id);
+      const fb = await postToFacebook(art.title, postLink, card);
+      if (fb?.id) console.log("Posted to Facebook (photo / postcard). Post id:", fb.id);
     } catch (e) {
-      console.error("Facebook error:", e?.message || e);
-    }
-    if (env("POST_TO_FACEBOOK_PHOTO") === "1") {
+      console.error("Facebook photo error:", e?.message || e);
       try {
-        const fbPhoto = await postToFacebook(art.title, postLink, card);
-        if (fbPhoto?.id) console.log("Posted to Facebook (photo). Post id:", fbPhoto.id);
-      } catch (e) {
-        console.error("Facebook photo error:", e?.message || e);
+        const fb2 = await postFacebookFeedTextOnly(art.title, postLink);
+        if (fb2?.id) console.log("Posted to Facebook (text + URL, no link preview). Post id:", fb2.id);
+      } catch (e2) {
+        console.error("Facebook text fallback error:", e2?.message || e2);
+        if (env("POST_TO_FACEBOOK_LINK_PREVIEW") === "1") {
+          try {
+            const fb3 = await postFacebookFeedLink(art.title, postLink);
+            if (fb3?.id) console.log("Posted to Facebook (link preview — may show site logo). Post id:", fb3.id);
+          } catch (e3) {
+            console.error("Facebook link-preview error:", e3?.message || e3);
+          }
+        }
       }
     }
   }
@@ -839,11 +866,12 @@ async function main() {
   }
 
   const postedKey = normalizeUrlForDedupe(art.url);
+  const postLinkKey = normalizeUrlForDedupe(postLink);
+  const longSiteLinkNorm = normalizeUrlForDedupe(longSiteLink);
   const prevPosted = Array.isArray(state?.posted_urls) ? state.posted_urls : [];
-  const mergedPosted = [postedKey, ...prevPosted.map((u) => normalizeUrlForDedupe(u)).filter((u) => u && u !== postedKey)].slice(
-    0,
-    5000
-  );
+  const mergedPosted = [postedKey, postLinkKey, longSiteLinkNorm, ...prevPosted.map((u) => normalizeUrlForDedupe(u))]
+    .filter((u, i, a) => u && a.indexOf(u) === i)
+    .slice(0, 5000);
 
   writeState({
     ...state,
