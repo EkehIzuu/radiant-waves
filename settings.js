@@ -7,6 +7,9 @@ export const API_BASE = "https://radiant-waves-1.onrender.com";
 // Refresh (30 mins)
 export const REFRESH_INTERVAL_MS = 30 * 60 * 1000;
 
+/** 0 = no day cutoff; match API `HOME_ARTICLE_MAX_AGE_DAYS` if you set it on Render */
+export const HOME_ARTICLE_MAX_AGE_DAYS = 0;
+
 // ✅ Live Broadcast (YouTube)
 export const YOUTUBE_LIVE_ID = "";
 

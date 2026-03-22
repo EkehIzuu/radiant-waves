@@ -3,7 +3,8 @@ import {
   API_BASE,
   REFRESH_INTERVAL_MS,
   YOUTUBE_LIVE_ID,
-  WEATHER_FALLBACK
+  WEATHER_FALLBACK,
+  HOME_ARTICLE_MAX_AGE_DAYS
 } from "./settings.js";
 
 /* =========================================================
@@ -104,6 +105,27 @@ function isLogoish(url) {
   return s.includes("logo") || s.includes("favicon") || s.includes("sprite") ||
          s.includes("placeholder") || s.includes("default") || s.includes("brand") ||
          s.endsWith(".svg");
+}
+/** Align with server article_filters + social script (home / snapshot) */
+function isLowQualityHomeImage(url) {
+  const s = String(url || "").toLowerCase();
+  if (!s || s.startsWith("data:")) return true;
+  if (isLogoish(url)) return true;
+  return /avatar|icon|1x1|spacer|pixel|tracking/.test(s);
+}
+function ingestTimeMs(a) {
+  return new Date(a?.ingestedAt || a?.publishedAt || 0).getTime();
+}
+function filterArticlesForHome(items, maxAgeDays = HOME_ARTICLE_MAX_AGE_DAYS) {
+  const useAge = Number(maxAgeDays) > 0;
+  const cutoff = useAge ? Date.now() - maxAgeDays * 86400000 : 0;
+  return (items || []).filter((a) => {
+    const ts = ingestTimeMs(a);
+    if (useAge && (!Number.isFinite(ts) || ts < cutoff)) return false;
+    const img = a.imageUrl || a.image || "";
+    if (!img || isLowQualityHomeImage(img)) return false;
+    return true;
+  });
 }
 function makePlaceholder(label = "News") {
   const svg = `
@@ -742,28 +764,6 @@ async function showArticleView(sourceUrl = "") {
 /* =======================
    HOME BLOCKS
 ======================= */
-function scoreBreaking(a) {
-  const t = (a?.title || "").toLowerCase();
-  const s = (a?.summary || "").toLowerCase();
-  const txt = `${t} ${s}`;
-
-  let score = 0;
-  const ageMins = (() => {
-    try {
-      const d = new Date(a.publishedAt || a.ingestedAt || Date.now());
-      return Math.max(0, (Date.now() - d.getTime()) / 60000);
-    } catch { return 999999; }
-  })();
-
-  score += Math.max(0, 600 - ageMins);
-  const hot = ["breaking", "alert", "just in", "live", "exclusive", "major", "update", "confirmed", "crisis"];
-  hot.forEach(k => { if (txt.includes(k)) score += 120; });
-  score += Math.min(60, (a.title || "").length);
-  if (a.imageUrl && !isLogoish(a.imageUrl)) score += 40;
-
-  return score;
-}
-
 function pickTopStories(all, n = 6) {
   const pool = all;
   const seen = new Set();
@@ -834,34 +834,6 @@ function weatherText(code) {
   return map[code] || "Weather";
 }
 
-function mixByFeed(items, feeds) {
-  const order = (Array.isArray(feeds) && feeds.length) ? feeds : ["politics", "football", "celebrity"];
-  const buckets = {}; order.forEach(f => buckets[f] = []);
-  const rest = [];
-  for (const a of (items || [])) {
-    const f = String((a && a.feed) || "").toLowerCase();
-    if (buckets[f]) buckets[f].push(a); else rest.push(a);
-  }
-  const outArr = [];
-  while (outArr.length < (items || []).length) {
-    let added = false;
-    for (const f of order) {
-      if (buckets[f].length) { outArr.push(buckets[f].shift()); added = true; }
-    }
-    if (!added) break;
-  }
-  const merged = outArr.concat(order.flatMap(f => buckets[f])).concat(rest);
-  const seen = new Set();
-  const final = [];
-  for (const a of merged) {
-    const k = String((a && a.title) || "").toLowerCase().trim();
-    if (!k || seen.has(k)) continue;
-    seen.add(k);
-    final.push(a);
-  }
-  return final;
-}
-
 /* =======================
    SNAPSHOT LOADERS
 ======================= */
@@ -900,7 +872,7 @@ async function loadHome() {
   const fetchRelaxedHome = () =>
     Promise.all(
       HOME_FEEDS.map((feed) =>
-        fetchJSONRelaxed(`${API_BASE}/articles?feed=${feed}&limit=${per}`, [])
+        fetchJSONRelaxed(`${API_BASE}/articles?feed=${feed}&limit=${per}&home=1`, [])
       )
     ).then((lists) => lists.flat());
 
@@ -910,7 +882,7 @@ async function loadHome() {
     try {
       const lists = await Promise.all(
         HOME_FEEDS.map((feed) =>
-          fetchJSON(`${API_BASE}/articles?feed=${feed}&limit=${per}`)
+          fetchJSON(`${API_BASE}/articles?feed=${feed}&limit=${per}&home=1`)
         )
       );
       all = lists.flat();
@@ -947,16 +919,19 @@ async function loadHome() {
     }
   }
 
-  all.sort((a, b) => new Date(b.publishedAt || b.ingestedAt || 0) - new Date(a.publishedAt || a.ingestedAt || 0));
-  const mixed = mixByFeed(all, HOME_FEEDS);
+  /* Broadcast-style: newest ingest first globally (not round-robin per feed) */
+  all.sort((a, b) => ingestTimeMs(b) - ingestTimeMs(a));
+  const mixedForText = all;
+  all = filterArticlesForHome(all);
+  const mixed = all;
   els.status.textContent = "";
 
-  const breaking = [...mixed].sort((a, b) => scoreBreaking(b) - scoreBreaking(a))[0];
+  const breaking = mixed[0] || null;
   const topStories = pickTopStories(mixed, 150);
   const heroStories = topStories.slice(0, 4);
   const moreStories = topStories.slice(4);
   const moreGrid = moreStories.length ? moreStories.map(a => cardHtml(a, { sectionLabel: "News" })).join("") : "";
-  const latestText = pickLatestTextOnly(mixed, 7);
+  const latestText = pickLatestTextOnly(mixedForText, 7);
   const weather = await getWeather();
 
   const yt = (YOUTUBE_LIVE_ID || "").trim();
@@ -1259,6 +1234,8 @@ async function loadFeed({ append = false } = {}) {
     items = await fetchJSONRelaxed(url, []);
     if (!items.length && !navigator.onLine) setStaleUI(true, "offline");
   }
+
+  items.sort((a, b) => ingestTimeMs(b) - ingestTimeMs(a));
 
   const label = FEED_TITLES[currentFeed] || (q ? "Results" : "News");
 

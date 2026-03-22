@@ -22,9 +22,13 @@ from google.cloud.firestore import Increment
 from google.oauth2 import service_account
 from google.api_core.exceptions import ResourceExhausted
 
+from article_filters import filter_home_articles, HOME_ARTICLE_MAX_AGE_DAYS
+
 # ----------------- Config -----------------
 PROJECT_ID = (os.getenv("GOOGLE_CLOUD_PROJECT") or "").strip()
 FETCH_WINDOW = int(os.getenv("FETCH_WINDOW", "500"))  # newest docs window for /articles
+# When ?home=1, pull a larger window then filter (age + image heuristics)
+HOME_FETCH_WINDOW = int(os.getenv("HOME_FETCH_WINDOW", str(min(FETCH_WINDOW * 4, 2000))))
 
 FALLBACK_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -276,15 +280,16 @@ def root():
 _MEM = {}  # key -> {ts, payload}
 _BOOT_ARTICLES = _read_fast_local_articles()
 
-def _mem_key(feed: str | None, q: str | None) -> str:
+def _mem_key(feed: str | None, q: str | None, home: bool = False) -> str:
     f = (feed or "").strip().lower()
     qq = (q or "").strip().lower()
-    return f"{f}||{qq}"
+    h = "1" if home else "0"
+    return f"{f}||{qq}||{h}"
 
-def _mem_get_articles(feed: str | None, q: str | None):
+def _mem_get_articles(feed: str | None, q: str | None, home: bool = False):
     if _MEM_TTL <= 0:
         return None
-    k = _mem_key(feed, q)
+    k = _mem_key(feed, q, home)
     obj = _MEM.get(k)
     if not obj:
         return None
@@ -292,8 +297,8 @@ def _mem_get_articles(feed: str | None, q: str | None):
         return obj["payload"]
     return None
 
-def _mem_set_articles(feed: str | None, q: str | None, payload):
-    k = _mem_key(feed, q)
+def _mem_set_articles(feed: str | None, q: str | None, payload, home: bool = False):
+    k = _mem_key(feed, q, home)
     _MEM[k] = {"ts": time.time(), "payload": payload}
 
 # =========================================================
@@ -320,14 +325,18 @@ def list_articles():
     else:
         limit = min(raw_limit or 150, 150)
         window = FETCH_WINDOW
+        if home:
+            window = min(max(limit * 6, HOME_FETCH_WINDOW), 2500)
 
     if cache_only:
         docs = _read_fast_local_articles()
+        if home and not is_search:
+            docs = filter_home_articles(docs, limit=None)
         resp = jsonify(docs[:limit])
         resp.headers["X-Source"] = "disk"
         return resp
 
-    mem = _mem_get_articles(feed, q)
+    mem = _mem_get_articles(feed, q, home)
     if mem is not None:
         resp = jsonify(mem[:limit])
         resp.headers["X-Source"] = "mem"
@@ -344,7 +353,7 @@ def list_articles():
         from_cache = True
     else:
         try:
-            qref = coll.order_by("ingestedAt", direction=firestore.Query.DESCENDING).limit(window)
+            qref = coll.order_by("ingestedAt", direction=firestore.Query.DESCENDING).limit(int(window))
             for _doc in qref.stream(retry=None, timeout=10):
                 d = _doc.to_dict()
                 d["id"] = _doc.id
@@ -380,10 +389,18 @@ def list_articles():
     if not from_cache:
         docs = [doc_to_public(d) for d in docs]
 
-    _mem_set_articles(feed, q, docs)
+    if home and not is_search:
+        docs = filter_home_articles(docs, max_age_days=HOME_ARTICLE_MAX_AGE_DAYS, limit=None)
+
+    _mem_set_articles(feed, q, docs, home)
 
     resp = jsonify(docs[:limit])
     resp.headers["X-Source"] = "snapshot-cache" if from_cache else "firestore"
+    if home and not is_search:
+        if HOME_ARTICLE_MAX_AGE_DAYS > 0:
+            resp.headers["X-Home-Filter"] = f"age<={HOME_ARTICLE_MAX_AGE_DAYS}d+image+ingestOrder"
+        else:
+            resp.headers["X-Home-Filter"] = "ingestOrder+image"
     return resp
 
 # ----------------- Backend Search (full Firestore or cache) -----------------

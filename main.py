@@ -20,6 +20,12 @@ from google.oauth2 import service_account
 # Firebase Storage (GCS) client (optional — snapshots only if bucket is set)
 from google.cloud import storage
 
+from article_filters import (
+    filter_home_articles,
+    HOME_ARTICLE_MAX_AGE_DAYS,
+    SNAPSHOT_HOME_SAMPLE_SIZE,
+)
+
 # Optional modern Firestore filter (silences positional-arg warning if available)
 try:
     from google.cloud.firestore_v1 import FieldFilter
@@ -861,11 +867,13 @@ def build_and_upload_snapshots():
     now = dt_utc_now()
     ts = now.strftime("%Y%m%d-%H%M%S")
 
-    # 1) Home snapshot (latest across all feeds)
-    home_docs = _query_latest(SNAPSHOT_LIMIT_HOME, feed=None)
+    # 1) Home snapshot: wide sample → filter (newest window + decent image URL) → cap
+    home_raw = _query_latest(SNAPSHOT_HOME_SAMPLE_SIZE, feed=None)
+    home_docs = filter_home_articles(home_raw, limit=SNAPSHOT_LIMIT_HOME)
     home_payload = {
         "generatedAt": iso(now),
         "count": len(home_docs),
+        "homeFilter": {"maxAgeDays": HOME_ARTICLE_MAX_AGE_DAYS, "imageHeuristics": True},
         "items": [_serialize_article(d) for d in home_docs],
     }
     home_gz = _gzip_bytes(home_payload)
