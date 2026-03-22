@@ -18,6 +18,10 @@ SNAPSHOT_HOME_SAMPLE_SIZE = int(
     os.getenv("SNAPSHOT_HOME_SAMPLE_SIZE", "600")
 )
 
+# Snapshot files (GitHub / GCS): only articles whose ingestedAt (else publishedAt)
+# is within this many days. Older rows stay in Firestore only (search).
+SNAPSHOT_MAX_AGE_DAYS = int(os.getenv("SNAPSHOT_MAX_AGE_DAYS", "5"))
+
 
 def _parse_ts(v: Any) -> Optional[datetime]:
     if v is None:
@@ -117,6 +121,31 @@ def filter_home_articles(
     out = [d for d in docs if article_passes_home_filters(d, max_age_days=max_age_days)]
     if limit is not None and limit > 0:
         out = out[:limit]
+    return out
+
+
+def filter_snapshot_by_ingest_age(
+    docs: List[dict],
+    *,
+    max_age_days: Optional[int] = None,
+) -> List[dict]:
+    """
+    Keep only articles with ingestedAt (fallback publishedAt) within the last N days.
+    Preserves input order. If max_age_days <= 0, returns all docs (feature off).
+    """
+    days = int(max_age_days if max_age_days is not None else SNAPSHOT_MAX_AGE_DAYS)
+    if days <= 0:
+        return list(docs)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    out: List[dict] = []
+    for d in docs:
+        if not isinstance(d, dict):
+            continue
+        t = _parse_ts(d.get("ingestedAt")) or _parse_ts(d.get("publishedAt"))
+        if not t:
+            continue
+        if t.astimezone(timezone.utc) >= cutoff:
+            out.append(d)
     return out
 
 

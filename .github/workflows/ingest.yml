@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   ingest:
@@ -14,6 +14,8 @@ jobs:
     env:
       GOOGLE_CLOUD_PROJECT: ${{ secrets.GOOGLE_CLOUD_PROJECT }}
       GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON }}
+      # Snapshot JSON only includes articles ingested within this many days (default 5)
+      SNAPSHOT_MAX_AGE_DAYS: "5"
       RUN_JOBS: "0"
 
     steps:
@@ -38,43 +40,13 @@ jobs:
       - name: Install deps (clean google namespace)
         run: |
           python -m pip install --upgrade pip
-
-          # ✅ remove known troublemakers if they exist
           python -m pip uninstall -y google google-cloud || true
-
-          # Install project deps
           pip install -r ingestor/requirements.txt
-
-          # ✅ force ensure storage is present
-          pip install -U google-cloud-storage google-cloud-core
-
-          # show installed google-cloud packages
+          pip install -U google-cloud-core
           python -m pip freeze | grep -E "google|grpc" || true
 
-      - name: Verify storage import (hard debug)
-        run: |
-          python - <<'PY'
-          import pkgutil, sys
-          print("Python:", sys.version)
-
-          import google
-          print("google module:", google)
-          print("google.__file__:", getattr(google, "__file__", None))
-          print("google.__path__:", list(getattr(google, "__path__", [])))
-
-          # list what's inside google.cloud
-          import google.cloud
-          print("google.cloud:", google.cloud)
-          print("google.cloud.__path__:", list(getattr(google.cloud, "__path__", [])))
-
-          print("Available under google.cloud:")
-          mods = sorted([m.name for m in pkgutil.iter_modules(google.cloud.__path__)])
-          print(mods[:50], "... total:", len(mods))
-
-          # the real test
-          from google.cloud import storage
-          print("✅ SUCCESS: google.cloud.storage imported:", storage)
-          PY
+      - name: Verify Firestore import
+        run: python -c "from google.cloud import firestore; print('firestore ok')"
 
       - name: Create Google credentials file (from secret)
         shell: bash
@@ -96,3 +68,15 @@ jobs:
       - name: Run ingest
         run: |
           python ingestor/main.py
+
+      - name: Commit snapshot files to repo (GitHub hosting)
+        run: |
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add snapshots/
+          if git diff --staged --quiet; then
+            echo "No snapshot file changes."
+          else
+            git commit -m "chore: update snapshots [skip ci]"
+            git push
+          fi

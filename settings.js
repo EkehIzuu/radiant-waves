@@ -17,15 +17,15 @@ export const YOUTUBE_LIVE_ID = "";
 export const WEATHER_FALLBACK = { name: "Lagos", lat: 6.5244, lon: 3.3792 };
 
 /* =========================================================
-   SNAPSHOT FRONT-MAN (Firebase Storage / GCS)
+   SNAPSHOT URLS (GitHub raw or Firebase Storage)
+   - Prefer same URLs as index.html window.RW_SNAPSHOT_*
 ========================================================= */
 
-// ✅ Put your public URLs here (IMPORTANT)
 export const SNAPSHOT_LATEST_URL =
-  "https://storage.googleapis.com/<YOUR_BUCKET>/snapshots/latest.json.gz";
+  "https://raw.githubusercontent.com/EkehIzuu/radiant-waves/main/snapshots/latest.json.gz";
 
 export const SNAPSHOT_FEED_BASE_URL =
-  "https://storage.googleapis.com/<YOUR_BUCKET>/snapshots/feeds/";
+  "https://raw.githubusercontent.com/EkehIzuu/radiant-waves/main/snapshots/feeds/";
 
 // helper: build feed snapshot url
 export function snapshotFeedUrl(feed) {

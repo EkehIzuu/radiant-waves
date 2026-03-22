@@ -17,13 +17,12 @@ import requests
 from google.cloud import firestore
 from google.oauth2 import service_account
 
-# Firebase Storage (GCS) client (optional — snapshots only if bucket is set)
-from google.cloud import storage
-
 from article_filters import (
     filter_home_articles_with_fallback,
+    filter_snapshot_by_ingest_age,
     HOME_ARTICLE_MAX_AGE_DAYS,
     SNAPSHOT_HOME_SAMPLE_SIZE,
+    SNAPSHOT_MAX_AGE_DAYS,
 )
 
 # Optional modern Firestore filter (silences positional-arg warning if available)
@@ -35,13 +34,9 @@ except Exception:
 # ----------------- Config -----------------
 PROJECT_ID = (os.getenv("GOOGLE_CLOUD_PROJECT") or "").strip()
 
-# Firebase Storage bucket (Cloud Storage for Firebase) — OPTIONAL
-FIREBASE_STORAGE_BUCKET = (os.getenv("FIREBASE_STORAGE_BUCKET") or "").strip()
-
-# Snapshot settings
+# Snapshot settings (repo snapshots/ — same layout as ingestor)
 SNAPSHOT_LIMIT_HOME = int(os.getenv("SNAPSHOT_LIMIT_HOME", "150"))          # latest combined
 SNAPSHOT_LIMIT_PER_FEED = int(os.getenv("SNAPSHOT_LIMIT_PER_FEED", "200"))  # per feed
-SNAPSHOT_ARCHIVE = os.getenv("SNAPSHOT_ARCHIVE", "1").strip() == "1"        # keep timestamp copies too
 
 # AI marker toggle (only affects Firestore fields; no AI calls)
 AI_MARK_PENDING = os.getenv("AI_MARK_PENDING", "1").strip() == "1"
@@ -100,13 +95,6 @@ def get_firestore_client():
     if creds:
         return firestore.Client(project=PROJECT_ID or pid, credentials=creds)
     return firestore.Client(project=PROJECT_ID) if PROJECT_ID else firestore.Client()
-
-
-def get_storage_client():
-    creds, pid = _load_credentials()
-    if creds:
-        return storage.Client(project=PROJECT_ID or pid, credentials=creds)
-    return storage.Client(project=PROJECT_ID) if PROJECT_ID else storage.Client()
 
 
 db = get_firestore_client()
@@ -847,57 +835,57 @@ def _gzip_bytes(payload: dict) -> bytes:
     return gzip.compress(raw, compresslevel=9)
 
 
-def _upload_gz(storage_client: storage.Client, bucket_name: str, path: str, gz_bytes: bytes, cache_seconds: int = 60):
-    bucket = storage_client.bucket(bucket_name)
-    blob = bucket.blob(path)
-    blob.cache_control = f"public, max-age={cache_seconds}"
-    blob.content_type = "application/json"
-    blob.content_encoding = "gzip"
-    blob.upload_from_string(gz_bytes)
-    log.info("Uploaded snapshot: gs://%s/%s (%d bytes gz)", bucket_name, path, len(gz_bytes))
+_REPO_ROOT = os.path.abspath(os.path.dirname(__file__))
+_SNAPSHOT_REPO_DIR = os.path.join(_REPO_ROOT, "snapshots")
+
+
+def _write_snapshot_to_repo(relative_path: str, gz_bytes: bytes) -> None:
+    safe = relative_path.replace("..", "").lstrip("/")
+    full = os.path.join(_SNAPSHOT_REPO_DIR, *safe.split("/"))
+    os.makedirs(os.path.dirname(full), exist_ok=True)
+    with open(full, "wb") as f:
+        f.write(gz_bytes)
+    log.info("Wrote snapshot file: %s (%d bytes gz)", full, len(gz_bytes))
 
 
 def build_and_upload_snapshots():
-    if not FIREBASE_STORAGE_BUCKET:
-        log.warning("FIREBASE_STORAGE_BUCKET not set — skipping snapshot upload.")
-        return
-
-    log.info("Building snapshots...")
-    storage_client = get_storage_client()
+    log.info("Building snapshots (repo snapshots/ only)...")
     now = dt_utc_now()
-    ts = now.strftime("%Y%m%d-%H%M%S")
 
-    # 1) Home snapshot: wide sample → filter (newest window + decent image URL) → cap
+    # 1) Home snapshot: wide sample → ingest-age window → image heuristics → cap
     home_raw = _query_latest(SNAPSHOT_HOME_SAMPLE_SIZE, feed=None)
+    home_raw = filter_snapshot_by_ingest_age(home_raw, max_age_days=SNAPSHOT_MAX_AGE_DAYS)
     home_docs = filter_home_articles_with_fallback(
-        home_raw, max_age_days=HOME_ARTICLE_MAX_AGE_DAYS, limit=SNAPSHOT_LIMIT_HOME
+        home_raw, max_age_days=0, limit=SNAPSHOT_LIMIT_HOME
     )
     home_payload = {
         "generatedAt": iso(now),
         "count": len(home_docs),
-        "homeFilter": {"maxAgeDays": HOME_ARTICLE_MAX_AGE_DAYS, "imageHeuristics": True},
+        "homeFilter": {
+            "maxAgeDays": HOME_ARTICLE_MAX_AGE_DAYS,
+            "imageHeuristics": True,
+            "snapshotMaxAgeDays": SNAPSHOT_MAX_AGE_DAYS,
+        },
         "items": [_serialize_article(d) for d in home_docs],
     }
     home_gz = _gzip_bytes(home_payload)
-    _upload_gz(storage_client, FIREBASE_STORAGE_BUCKET, "snapshots/latest.json.gz", home_gz, cache_seconds=60)
-
-    if SNAPSHOT_ARCHIVE:
-        _upload_gz(storage_client, FIREBASE_STORAGE_BUCKET, f"snapshots/archive/latest-{ts}.json.gz", home_gz, cache_seconds=31536000)
+    _write_snapshot_to_repo("latest.json.gz", home_gz)
 
     # 2) Per-feed snapshots
+    feed_query_window = min(800, max(SNAPSHOT_LIMIT_PER_FEED * 4, 200))
     for feed in FEEDS.keys():
-        docs = _query_latest(SNAPSHOT_LIMIT_PER_FEED, feed=feed)
+        raw_feed = _query_latest(feed_query_window, feed=feed)
+        docs = filter_snapshot_by_ingest_age(raw_feed, max_age_days=SNAPSHOT_MAX_AGE_DAYS)
+        docs = docs[:SNAPSHOT_LIMIT_PER_FEED]
         payload = {
             "generatedAt": iso(now),
             "feed": feed,
             "count": len(docs),
+            "snapshotMaxAgeDays": SNAPSHOT_MAX_AGE_DAYS,
             "items": [_serialize_article(d) for d in docs],
         }
         gz = _gzip_bytes(payload)
-        _upload_gz(storage_client, FIREBASE_STORAGE_BUCKET, f"snapshots/feeds/{feed}.json.gz", gz, cache_seconds=60)
-
-        if SNAPSHOT_ARCHIVE:
-            _upload_gz(storage_client, FIREBASE_STORAGE_BUCKET, f"snapshots/archive/feeds/{feed}-{ts}.json.gz", gz, cache_seconds=31536000)
+        _write_snapshot_to_repo(f"feeds/{feed}.json.gz", gz)
 
     log.info("Snapshots done.")
 

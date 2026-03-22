@@ -8,13 +8,11 @@ import {
 } from "./settings.js";
 
 /* =========================================================
-   SNAPSHOT (Storage-first) + OFFLINE FALLBACK (localStorage)
+   SNAPSHOT — fetch GitHub raw JSON only (no localStorage)
 ========================================================= */
 const SNAPSHOT_CFG = {
   latestUrl: (typeof window !== "undefined" && window.RW_SNAPSHOT_LATEST) ? String(window.RW_SNAPSHOT_LATEST) : "",
   feedBase: (typeof window !== "undefined" && window.RW_SNAPSHOT_FEED_BASE) ? String(window.RW_SNAPSHOT_FEED_BASE) : "",
-  keyLatest: "rw_snapshot_latest_v1",
-  keyFeedPrefix: "rw_snapshot_feed_v1_",
 };
 
 function snapshotUrlForFeed(feed) {
@@ -31,20 +29,10 @@ async function fetchSnapshotGz(url) {
   return res.json();
 }
 
-function saveSnapshotCache(key, payload) {
-  try { localStorage.setItem(key, JSON.stringify(payload)); } catch {}
-}
-function loadSnapshotCache(key) {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return null;
-    const obj = JSON.parse(raw);
-    return obj && typeof obj === "object" ? obj : null;
-  } catch { return null; }
-}
 function setStaleUI(on, meta = "") {
   if (!els.status) return;
   if (on) els.status.textContent = meta ? `Offline / stale • ${meta}` : "Offline / stale";
+  else els.status.textContent = "";
 }
 
 /* =======================
@@ -842,7 +830,6 @@ async function loadHomeSnapshot() {
   try {
     const payload = await fetchSnapshotGz(SNAPSHOT_CFG.latestUrl);
     if (payload && Array.isArray(payload.items)) {
-      saveSnapshotCache(SNAPSHOT_CFG.keyLatest, payload);
       return payload;
     }
   } catch {}
@@ -856,7 +843,6 @@ async function loadFeedSnapshot(feed) {
   try {
     const payload = await fetchSnapshotGz(url);
     if (payload && Array.isArray(payload.items)) {
-      saveSnapshotCache(SNAPSHOT_CFG.keyFeedPrefix + feed, payload);
       return payload;
     }
   } catch {}
@@ -868,62 +854,17 @@ async function loadHome() {
   els.status.textContent = "Loading…";
 
   const per = Math.max(6, Math.min(homeLoadedLimit, HOME_LIMIT));
-  /* One global request (newest ingests across all feeds). Per-feed ?feed= used to scan global N then filter — often returned []. */
-  const homeFetchLimit = Math.min(150, Math.max(per * 3, 36));
-
-  const fetchRelaxedHome = () =>
-    fetchJSONRelaxed(`${API_BASE}/articles?limit=${homeFetchLimit}&home=1`, []);
 
   let all = [];
-  let liveOk = false;
-  if (navigator.onLine) {
-    try {
-      let raw = await fetchJSON(`${API_BASE}/articles?limit=${homeFetchLimit}&home=1`);
-      all = Array.isArray(raw) ? raw : [];
-      if (!all.length) {
-        raw = await fetchJSON(`${API_BASE}/articles?limit=${homeFetchLimit}`);
-        all = Array.isArray(raw) ? raw : [];
-      }
-      liveOk = true;
-      setStaleUI(false);
-    } catch {
-      try {
-        const raw = await fetchJSON(`${API_BASE}/articles?limit=${homeFetchLimit}`);
-        all = Array.isArray(raw) ? raw : [];
-        if (all.length) {
-          liveOk = true;
-          setStaleUI(false);
-        }
-      } catch {
-        /* use snapshot / relaxed fallback */
-      }
-    }
+
+  /* GitHub snapshot (RW_SNAPSHOT_LATEST) — no API fallback, no localStorage */
+  const snapshot = await loadHomeSnapshot();
+  if (snapshot?.items?.length) {
+    all = snapshot.items.slice(0, Math.max(20, per * 3));
   }
 
-  if (!liveOk) {
-    let snapshot = await loadHomeSnapshot();
-    let usedStale = false;
-
-    if (!snapshot) {
-      const cached = loadSnapshotCache(SNAPSHOT_CFG.keyLatest);
-      if (cached && Array.isArray(cached.items) && cached.items.length) {
-        snapshot = cached;
-        usedStale = true;
-      }
-    }
-
-    if (snapshot && Array.isArray(snapshot.items)) {
-      all = snapshot.items.slice(0, Math.max(20, per * 3));
-      if (usedStale) setStaleUI(true, "showing last saved snapshot");
-      else setStaleUI(true, "snapshot (API unavailable)");
-    } else {
-      try {
-        all = await fetchRelaxedHome();
-      } catch {
-        all = [];
-      }
-      setStaleUI(!navigator.onLine, "live fetch failed");
-    }
+  if (!all.length) {
+    setStaleUI(!navigator.onLine, navigator.onLine ? "no snapshot yet" : "offline — snapshot unavailable");
   }
 
   /* Broadcast-style: newest ingest first globally (not round-robin per feed) */
@@ -933,7 +874,6 @@ async function loadHome() {
   /* If every row lacks a usable imageUrl, strict filter would blank the site — show stories anyway */
   if (!filtered.length && all.length) filtered = all;
   const mixed = filtered;
-  els.status.textContent = "";
 
   const breaking = mixed[0] || null;
   const topStories = pickTopStories(mixed, 150);
@@ -1200,43 +1140,22 @@ async function loadFeed({ append = false } = {}) {
   let items = [];
 
   if (!isSearch && currentFeed) {
-    let feedLiveOk = false;
-    if (navigator.onLine) {
-      try {
-        const apiUrl = new URL(`${API_BASE}/articles`);
-        apiUrl.searchParams.set("feed", currentFeed);
-        apiUrl.searchParams.set("limit", String(Math.min(loadedLimit, MAX_LIMIT)));
-        const raw = await fetchJSON(apiUrl);
-        items = Array.isArray(raw) ? raw : [];
-        feedLiveOk = true;
-        setStaleUI(false);
-      } catch {
-        items = [];
-      }
-    }
-    if (!feedLiveOk) {
-      let snap = await loadFeedSnapshot(currentFeed);
-      let usedStale = false;
-
-      if (!snap) {
-        const cached = loadSnapshotCache(SNAPSHOT_CFG.keyFeedPrefix + currentFeed);
-        if (cached && Array.isArray(cached.items) && cached.items.length) {
-          snap = cached;
-          usedStale = true;
-        }
-      }
-
-      if (snap && Array.isArray(snap.items)) {
-        items = snap.items.slice(0, Math.min(loadedLimit, MAX_LIMIT));
-        if (usedStale) setStaleUI(true, "showing last saved snapshot");
-        else setStaleUI(true, "snapshot (API unavailable)");
-      }
+    const snap = await loadFeedSnapshot(currentFeed);
+    if (snap?.items?.length) {
+      items = snap.items.slice(0, Math.min(loadedLimit, MAX_LIMIT));
+      setStaleUI(false);
+    } else {
+      setStaleUI(
+        !navigator.onLine,
+        navigator.onLine ? "no snapshot for this feed" : "offline — snapshot unavailable"
+      );
     }
   }
 
-  if (!items.length) {
+  /* Search only: Firestore-backed API (browse/home/feed lists are snapshot-only above) */
+  if (!items.length && isSearch) {
     const url = new URL(`${API_BASE}/articles`);
-    if (q) url.searchParams.set("q", q);
+    url.searchParams.set("q", q);
     if (currentFeed) url.searchParams.set("feed", currentFeed);
     url.searchParams.set("limit", String(Math.min(loadedLimit, MAX_LIMIT)));
 
@@ -1259,7 +1178,7 @@ async function loadFeed({ append = false } = {}) {
 
   if (!items.length) {
     renderEmptyState(els.results, "Nothing to show yet.");
-    if (!navigator.onLine) setStaleUI(true, "no cached data");
+    if (!navigator.onLine) setStaleUI(true, "offline");
   }
 
   hydrateLazyImages(els.results);
