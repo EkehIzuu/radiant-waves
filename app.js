@@ -897,28 +897,54 @@ async function loadHome() {
 
   const per = Math.max(6, Math.min(homeLoadedLimit, HOME_LIMIT));
 
-  let snapshot = await loadHomeSnapshot();
-  let usedStale = false;
+  const fetchRelaxedHome = () =>
+    Promise.all(
+      HOME_FEEDS.map((feed) =>
+        fetchJSONRelaxed(`${API_BASE}/articles?feed=${feed}&limit=${per}`, [])
+      )
+    ).then((lists) => lists.flat());
 
-  if (!snapshot) {
-    const cached = loadSnapshotCache(SNAPSHOT_CFG.keyLatest);
-    if (cached && Array.isArray(cached.items) && cached.items.length) {
-      snapshot = cached;
-      usedStale = true;
+  let all = [];
+  let liveOk = false;
+  if (navigator.onLine) {
+    try {
+      const lists = await Promise.all(
+        HOME_FEEDS.map((feed) =>
+          fetchJSON(`${API_BASE}/articles?feed=${feed}&limit=${per}`)
+        )
+      );
+      all = lists.flat();
+      liveOk = true;
+      setStaleUI(false);
+    } catch {
+      /* use snapshot / relaxed fallback */
     }
   }
 
-  let all = [];
-  if (snapshot && Array.isArray(snapshot.items)) {
-    all = snapshot.items.slice(0, Math.max(20, per * 3));
-    if (usedStale) setStaleUI(true, "showing last saved snapshot");
-    else setStaleUI(false);
-  } else {
-    const lists = await Promise.all(
-      HOME_FEEDS.map((feed) => fetchJSONRelaxed(`${API_BASE}/articles?feed=${feed}&limit=${per}`, []))
-    );
-    all = lists.flat();
-    setStaleUI(!navigator.onLine, "live fetch failed");
+  if (!liveOk) {
+    let snapshot = await loadHomeSnapshot();
+    let usedStale = false;
+
+    if (!snapshot) {
+      const cached = loadSnapshotCache(SNAPSHOT_CFG.keyLatest);
+      if (cached && Array.isArray(cached.items) && cached.items.length) {
+        snapshot = cached;
+        usedStale = true;
+      }
+    }
+
+    if (snapshot && Array.isArray(snapshot.items)) {
+      all = snapshot.items.slice(0, Math.max(20, per * 3));
+      if (usedStale) setStaleUI(true, "showing last saved snapshot");
+      else setStaleUI(true, "snapshot (API unavailable)");
+    } else {
+      try {
+        all = await fetchRelaxedHome();
+      } catch {
+        all = [];
+      }
+      setStaleUI(!navigator.onLine, "live fetch failed");
+    }
   }
 
   all.sort((a, b) => new Date(b.publishedAt || b.ingestedAt || 0) - new Date(a.publishedAt || a.ingestedAt || 0));
@@ -1190,21 +1216,37 @@ async function loadFeed({ append = false } = {}) {
   let items = [];
 
   if (!isSearch && currentFeed) {
-    let snap = await loadFeedSnapshot(currentFeed);
-    let usedStale = false;
-
-    if (!snap) {
-      const cached = loadSnapshotCache(SNAPSHOT_CFG.keyFeedPrefix + currentFeed);
-      if (cached && Array.isArray(cached.items) && cached.items.length) {
-        snap = cached;
-        usedStale = true;
+    let feedLiveOk = false;
+    if (navigator.onLine) {
+      try {
+        const apiUrl = new URL(`${API_BASE}/articles`);
+        apiUrl.searchParams.set("feed", currentFeed);
+        apiUrl.searchParams.set("limit", String(Math.min(loadedLimit, MAX_LIMIT)));
+        const raw = await fetchJSON(apiUrl);
+        items = Array.isArray(raw) ? raw : [];
+        feedLiveOk = true;
+        setStaleUI(false);
+      } catch {
+        items = [];
       }
     }
+    if (!feedLiveOk) {
+      let snap = await loadFeedSnapshot(currentFeed);
+      let usedStale = false;
 
-    if (snap && Array.isArray(snap.items)) {
-      items = snap.items.slice(0, Math.min(loadedLimit, MAX_LIMIT));
-      if (usedStale) setStaleUI(true, "showing last saved snapshot");
-      else setStaleUI(false);
+      if (!snap) {
+        const cached = loadSnapshotCache(SNAPSHOT_CFG.keyFeedPrefix + currentFeed);
+        if (cached && Array.isArray(cached.items) && cached.items.length) {
+          snap = cached;
+          usedStale = true;
+        }
+      }
+
+      if (snap && Array.isArray(snap.items)) {
+        items = snap.items.slice(0, Math.min(loadedLimit, MAX_LIMIT));
+        if (usedStale) setStaleUI(true, "showing last saved snapshot");
+        else setStaleUI(true, "snapshot (API unavailable)");
+      }
     }
   }
 

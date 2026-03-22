@@ -38,14 +38,14 @@ CACHE_PATH = os.path.join(os.path.dirname(__file__), "cache_articles.json")
 SNAPSHOT_PATH = os.path.join(os.path.dirname(__file__), "snapshots", "latest.json.gz")
 # 1 = never hit Firestore (browse + search use disk only; emergency / offline dev).
 DISABLE_FIRESTORE_READS = os.getenv("DISABLE_FIRESTORE_READS", "0") in ("1", "true", "TRUE", "yes", "on")
-# 1 = /articles without ?q= uses snapshots/cache only; ?q= search still uses Firestore when DISABLE_FIRESTORE_READS=0.
-SERVE_BROWSE_FROM_SNAPSHOT = os.getenv("SERVE_BROWSE_FROM_SNAPSHOT", "1") in ("1", "true", "TRUE", "yes", "on")
+# 1 = /articles browse uses disk snapshot/cache only (saves quota; can look stale). Default 0 = Firestore every time.
+SERVE_BROWSE_FROM_SNAPSHOT = os.getenv("SERVE_BROWSE_FROM_SNAPSHOT", "0") in ("1", "true", "TRUE", "yes", "on")
 
 # Gate the scheduler so it runs in exactly ONE process
 RUN_JOBS = os.getenv("RUN_JOBS", "0") == "1"
 
 # Memory cache TTLs
-_MEM_TTL = int(os.getenv("MEM_TTL_SECONDS", "90"))  # general /articles TTL
+_MEM_TTL = int(os.getenv("MEM_TTL_SECONDS", "0"))  # 0 = no in-memory cache for /articles (fresh each request)
 _PICK_TTL = int(os.getenv("PICK_CACHE_SECONDS", "86400"))  # pick_image TTL
 
 # ✅ Trending job protection
@@ -282,6 +282,8 @@ def _mem_key(feed: str | None, q: str | None) -> str:
     return f"{f}||{qq}"
 
 def _mem_get_articles(feed: str | None, q: str | None):
+    if _MEM_TTL <= 0:
+        return None
     k = _mem_key(feed, q)
     obj = _MEM.get(k)
     if not obj:
