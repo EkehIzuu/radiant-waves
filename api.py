@@ -317,6 +317,7 @@ def list_articles():
     feed = (request.args.get("feed") or "").strip()
     q = (request.args.get("q") or "").strip().lower()
     cache_only = request.args.get("cache") == "1"
+    home = request.args.get("home") in ("1", "true", "TRUE", "yes", "on")
 
     is_search = bool(q)
     try:

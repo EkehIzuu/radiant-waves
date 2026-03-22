@@ -878,12 +878,25 @@ async function loadHome() {
   let liveOk = false;
   if (navigator.onLine) {
     try {
-      const raw = await fetchJSON(`${API_BASE}/articles?limit=${homeFetchLimit}&home=1`);
+      let raw = await fetchJSON(`${API_BASE}/articles?limit=${homeFetchLimit}&home=1`);
       all = Array.isArray(raw) ? raw : [];
+      if (!all.length) {
+        raw = await fetchJSON(`${API_BASE}/articles?limit=${homeFetchLimit}`);
+        all = Array.isArray(raw) ? raw : [];
+      }
       liveOk = true;
       setStaleUI(false);
     } catch {
-      /* use snapshot / relaxed fallback */
+      try {
+        const raw = await fetchJSON(`${API_BASE}/articles?limit=${homeFetchLimit}`);
+        all = Array.isArray(raw) ? raw : [];
+        if (all.length) {
+          liveOk = true;
+          setStaleUI(false);
+        }
+      } catch {
+        /* use snapshot / relaxed fallback */
+      }
     }
   }
 
