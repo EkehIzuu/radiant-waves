@@ -6,6 +6,24 @@ import sharp from "sharp";
 const SNAPSHOT_LOCAL = path.join(process.cwd(), "snapshots", "latest.json.gz");
 const STATE_PATH = path.join(process.cwd(), "social_state.json");
 
+/**
+ * Latest ingest list = same file ingest commits: snapshots/latest.json.gz on the default branch.
+ * - SNAPSHOT_URL: explicit override (any HTTPS gzipped JSON).
+ * - Else in GitHub Actions: raw.githubusercontent.com/OWNER/REPO/REF/snapshots/latest.json.gz
+ *   (uses GITHUB_REPOSITORY + SNAPSHOT_REF or GITHUB_REF_NAME so each run pulls fresh snapshot, not stale checkout).
+ * - Else local dev: read snapshots/latest.json.gz from disk.
+ */
+function resolveSnapshotFetchUrl() {
+  const explicit = env("SNAPSHOT_URL");
+  if (explicit) return explicit;
+  const repo = env("GITHUB_REPOSITORY");
+  const ref = env("SNAPSHOT_REF") || env("GITHUB_REF_NAME") || "main";
+  if (repo) {
+    return `https://raw.githubusercontent.com/${repo}/${ref}/snapshots/latest.json.gz`;
+  }
+  return "";
+}
+
 function env(name, fallback = "") {
   return (process.env[name] || fallback).trim();
 }
@@ -38,14 +56,24 @@ function writeState(state) {
 
 function getPostedUrlSet(state) {
   const arr = Array.isArray(state?.posted_urls) ? state.posted_urls : [];
-  const cleaned = arr.filter((u) => typeof u === "string" && /^https?:\/\//i.test(u));
-  return new Set(cleaned);
+  const set = new Set();
+  for (const u of arr) {
+    if (typeof u !== "string" || !/^https?:\/\//i.test(u)) continue;
+    const n = normalizeUrlForDedupe(u);
+    if (n) set.add(n);
+  }
+  return set;
 }
 
 function getSkippedUrlSet(state) {
   const arr = Array.isArray(state?.skipped_urls) ? state.skipped_urls : [];
-  const cleaned = arr.filter((u) => typeof u === "string" && /^https?:\/\//i.test(u));
-  return new Set(cleaned);
+  const set = new Set();
+  for (const u of arr) {
+    if (typeof u !== "string" || !/^https?:\/\//i.test(u)) continue;
+    const n = normalizeUrlForDedupe(u);
+    if (n) set.add(n);
+  }
+  return set;
 }
 
 function isLowQualityImageUrl(url) {
@@ -88,24 +116,45 @@ async function fetchValidatedImageBuffer(imageUrl) {
 }
 
 async function loadSnapshotItems() {
-  const snapshotUrl = env("SNAPSHOT_URL");
+  const snapshotUrl = resolveSnapshotFetchUrl();
 
   if (snapshotUrl) {
-    const res = await fetch(snapshotUrl, { headers: { "User-Agent": "RadiantWaves/1.0" } });
-    if (!res.ok) throw new Error(`SNAPSHOT_URL fetch failed: ${res.status}`);
+    const bust = new URL(snapshotUrl);
+    bust.searchParams.set("_t", String(Date.now()));
+    const res = await fetch(bust.toString(), {
+      headers: {
+        "User-Agent": "RadiantWaves/1.0 (social)",
+        "Cache-Control": "no-cache",
+      },
+    });
+    if (!res.ok) throw new Error(`Snapshot fetch failed (${snapshotUrl}): ${res.status}`);
     const gz = Buffer.from(await res.arrayBuffer());
     const raw = zlib.gunzipSync(gz).toString("utf8");
     const data = JSON.parse(raw);
-    return Array.isArray(data?.items) ? data.items : [];
+    const items = Array.isArray(data?.items) ? data.items : [];
+    if (data?.generatedAt) {
+      console.log("[snapshot] source=remote generatedAt=%s items=%d", data.generatedAt, items.length);
+    } else {
+      console.log("[snapshot] source=remote items=%d", items.length);
+    }
+    return items;
   }
 
   if (!fs.existsSync(SNAPSHOT_LOCAL)) {
-    throw new Error("No snapshot source found. Set SNAPSHOT_URL or commit snapshots/latest.json.gz.");
+    throw new Error(
+      "No snapshot source. In CI set GITHUB_REPOSITORY (auto) or SNAPSHOT_URL. Locally commit snapshots/latest.json.gz."
+    );
   }
   const gz = fs.readFileSync(SNAPSHOT_LOCAL);
   const raw = zlib.gunzipSync(gz).toString("utf8");
   const data = JSON.parse(raw);
-  return Array.isArray(data?.items) ? data.items : [];
+  const items = Array.isArray(data?.items) ? data.items : [];
+  if (data?.generatedAt) {
+    console.log("[snapshot] source=local file generatedAt=%s items=%d", data.generatedAt, items.length);
+  } else {
+    console.log("[snapshot] source=local file items=%d", items.length);
+  }
+  return items;
 }
 
 function parseTs(v) {
@@ -707,6 +756,12 @@ async function main() {
   }
 
   const state = readState();
+  console.log(
+    "[social] newest-ingest pick: %d snapshot items | %d posted URLs (normalized), %d skipped",
+    items.length,
+    getPostedUrlSet(state).size,
+    getSkippedUrlSet(state).size
+  );
   let art = pickLatestUnposted(items, state);
   let imageBufferValidated = null;
   while (art) {

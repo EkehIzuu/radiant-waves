@@ -1,4 +1,5 @@
-# Post latest snapshot article to Telegram/Instagram.
+# Post latest ingest article from snapshots/latest.json.gz (same source as site home snapshot).
+# Fetches fresh JSON from raw.githubusercontent.com on each run (not the possibly stale checkout).
 name: Post to social (snapshot)
 
 # One run at a time so social_state.json push/rebase races don't drop posted_urls.
@@ -37,7 +38,11 @@ jobs:
           FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
           FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
           IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          # Optional: full URL to gzipped snapshot JSON. If unset, script uses:
+          # https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$SNAPSHOT_REF|GITHUB_REF_NAME/snapshots/latest.json.gz
           SNAPSHOT_URL: ${{ vars.SNAPSHOT_URL }}
+          # Optional: branch name for raw URL (default: GITHUB_REF_NAME, e.g. main)
+          SNAPSHOT_REF: ${{ vars.SNAPSHOT_REF }}
           SITE_URL: ${{ vars.SITE_URL }}
           SHORTEN_LINK: ${{ vars.SHORTEN_LINK }}
           # Default 1 when variable unset (repo root / Actions). Set var to 0 to disable.
