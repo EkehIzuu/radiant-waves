@@ -4,7 +4,8 @@ import {
   REFRESH_INTERVAL_MS,
   YOUTUBE_LIVE_ID,
   WEATHER_FALLBACK,
-  HOME_ARTICLE_MAX_AGE_DAYS
+  HOME_ARTICLE_MAX_AGE_DAYS,
+  fetchSnapshotJson
 } from "./settings.js";
 
 /* =========================================================
@@ -19,14 +20,6 @@ function snapshotUrlForFeed(feed) {
   if (!feed) return "";
   if (!SNAPSHOT_CFG.feedBase) return "";
   return `${SNAPSHOT_CFG.feedBase.replace(/\/+$/, "/")}${encodeURIComponent(feed)}.json.gz`;
-}
-
-async function fetchSnapshotGz(url) {
-  const u = new URL(url, location.href);
-  u.searchParams.set("_t", String(Date.now()));
-  const res = await fetch(u.toString(), { cache: "no-store" });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
 }
 
 function setStaleUI(on, meta = "") {
@@ -828,11 +821,13 @@ function weatherText(code) {
 async function loadHomeSnapshot() {
   if (!SNAPSHOT_CFG.latestUrl) return null;
   try {
-    const payload = await fetchSnapshotGz(SNAPSHOT_CFG.latestUrl);
+    const payload = await fetchSnapshotJson(SNAPSHOT_CFG.latestUrl);
     if (payload && Array.isArray(payload.items)) {
       return payload;
     }
-  } catch {}
+  } catch (e) {
+    console.warn("[snapshot] home load failed:", e?.message || e);
+  }
   return null;
 }
 
@@ -841,11 +836,13 @@ async function loadFeedSnapshot(feed) {
   if (!url) return null;
 
   try {
-    const payload = await fetchSnapshotGz(url);
+    const payload = await fetchSnapshotJson(url);
     if (payload && Array.isArray(payload.items)) {
       return payload;
     }
-  } catch {}
+  } catch (e) {
+    console.warn("[snapshot] feed load failed:", feed, e?.message || e);
+  }
   return null;
 }
 
