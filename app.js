@@ -831,17 +831,43 @@ async function loadHomeSnapshot() {
   return null;
 }
 
-async function loadFeedSnapshot(feed) {
-  const url = snapshotUrlForFeed(feed);
-  if (!url) return null;
+function normalizeFeedKey(f) {
+  return String(f || "").trim().toLowerCase();
+}
 
-  try {
-    const payload = await fetchSnapshotJson(url);
-    if (payload && Array.isArray(payload.items)) {
-      return payload;
+/**
+ * Per-feed file: snapshots/feeds/{feed}.json.gz (written by ingest).
+ * If missing (404) or empty, fall back to home snapshot latest.json.gz and filter by `feed`.
+ */
+async function loadFeedSnapshot(feed) {
+  const key = normalizeFeedKey(feed);
+  if (!key) return null;
+
+  const url = snapshotUrlForFeed(feed);
+  if (url) {
+    try {
+      const payload = await fetchSnapshotJson(url);
+      if (payload && Array.isArray(payload.items) && payload.items.length) {
+        return payload;
+      }
+    } catch (e) {
+      console.warn("[snapshot] per-feed file missing or empty, trying latest.json filter:", key, e?.message || e);
     }
+  }
+
+  if (!SNAPSHOT_CFG.latestUrl) return null;
+  try {
+    const payload = await fetchSnapshotJson(SNAPSHOT_CFG.latestUrl);
+    if (!payload || !Array.isArray(payload.items)) return null;
+    const items = payload.items.filter((a) => normalizeFeedKey(a.feed) === key);
+    return {
+      ...payload,
+      items,
+      count: items.length,
+      _feedFilter: key,
+    };
   } catch (e) {
-    console.warn("[snapshot] feed load failed:", feed, e?.message || e);
+    console.warn("[snapshot] feed fallback from latest failed:", key, e?.message || e);
   }
   return null;
 }

@@ -122,6 +122,7 @@ async function loadSnapshotItems() {
     const bust = new URL(snapshotUrl);
     bust.searchParams.set("_t", String(Date.now()));
     const res = await fetch(bust.toString(), {
+      signal: AbortSignal.timeout(60000),
       headers: {
         "User-Agent": "RadiantWaves/1.0 (social)",
         "Cache-Control": "no-cache",
@@ -764,7 +765,10 @@ async function main() {
   );
   let art = pickLatestUnposted(items, state);
   let imageBufferValidated = null;
-  while (art) {
+  let imageAttempts = 0;
+  const maxImageAttempts = 60;
+  while (art && imageAttempts < maxImageAttempts) {
+    imageAttempts += 1;
     imageBufferValidated = await fetchValidatedImageBuffer(art.imageUrl);
     if (imageBufferValidated) break;
     const skipKey = normalizeUrlForDedupe(art.url);
@@ -773,6 +777,9 @@ async function main() {
       ...(Array.isArray(state?.skipped_urls) ? state.skipped_urls : []).filter((u) => normalizeUrlForDedupe(u) !== skipKey),
     ].slice(0, 5000);
     art = pickLatestUnposted(items, state);
+  }
+  if (imageAttempts >= maxImageAttempts && !imageBufferValidated) {
+    console.warn("[social] Stopped after %d image validation attempts (avoid infinite loop).", maxImageAttempts);
   }
   if (!art) {
     console.log("No new snapshot article with a quality image to post.");

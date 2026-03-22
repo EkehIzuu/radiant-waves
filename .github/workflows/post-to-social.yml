@@ -17,6 +17,8 @@ on:
 jobs:
   post:
     runs-on: ubuntu-latest
+    # Prevent a stuck Meta/network step from running for hours (default job limit is very high).
+    timeout-minutes: 25
     permissions:
       contents: write
     steps:
