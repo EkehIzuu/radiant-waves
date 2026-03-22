@@ -22,6 +22,11 @@ from google.cloud.firestore import Increment
 from google.oauth2 import service_account
 from google.api_core.exceptions import ResourceExhausted
 
+try:
+    from google.cloud.firestore_v1 import FieldFilter
+except Exception:
+    FieldFilter = None
+
 from article_filters import filter_home_articles_with_fallback, HOME_ARTICLE_MAX_AGE_DAYS
 
 # ----------------- Config -----------------
@@ -353,11 +358,40 @@ def list_articles():
         from_cache = True
     else:
         try:
-            qref = coll.order_by("ingestedAt", direction=firestore.Query.DESCENDING).limit(int(window))
-            for _doc in qref.stream(retry=None, timeout=10):
-                d = _doc.to_dict()
-                d["id"] = _doc.id
-                docs.append(d)
+            def _stream_docs(qref):
+                out = []
+                for _doc in qref.stream(retry=None, timeout=10):
+                    d = _doc.to_dict()
+                    d["id"] = _doc.id
+                    out.append(d)
+                return out
+
+            # Per-feed: must query by feed in Firestore — global scan + filter often returns [] when
+            # the newest N docs don't include that feed.
+            if feed and not is_search:
+                try:
+                    if FieldFilter:
+                        qref = (
+                            coll.where(filter=FieldFilter("feed", "==", feed.strip()))
+                            .order_by("ingestedAt", direction=firestore.Query.DESCENDING)
+                            .limit(int(window))
+                        )
+                    else:
+                        qref = (
+                            coll.where("feed", "==", feed.strip())
+                            .order_by("ingestedAt", direction=firestore.Query.DESCENDING)
+                            .limit(int(window))
+                        )
+                    docs = _stream_docs(qref)
+                except Exception as e:
+                    log.warning("Per-feed Firestore query failed; using wider global scan: %s", e)
+                    qref = coll.order_by("ingestedAt", direction=firestore.Query.DESCENDING).limit(
+                        min(int(window) * 4, 5000)
+                    )
+                    docs = _stream_docs(qref)
+            else:
+                qref = coll.order_by("ingestedAt", direction=firestore.Query.DESCENDING).limit(int(window))
+                docs = _stream_docs(qref)
 
             public_rows = [doc_to_public(d) for d in docs]
             _write_cache(public_rows)

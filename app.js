@@ -868,24 +868,18 @@ async function loadHome() {
   els.status.textContent = "Loading…";
 
   const per = Math.max(6, Math.min(homeLoadedLimit, HOME_LIMIT));
+  /* One global request (newest ingests across all feeds). Per-feed ?feed= used to scan global N then filter — often returned []. */
+  const homeFetchLimit = Math.min(150, Math.max(per * 3, 36));
 
   const fetchRelaxedHome = () =>
-    Promise.all(
-      HOME_FEEDS.map((feed) =>
-        fetchJSONRelaxed(`${API_BASE}/articles?feed=${feed}&limit=${per}&home=1`, [])
-      )
-    ).then((lists) => lists.flat());
+    fetchJSONRelaxed(`${API_BASE}/articles?limit=${homeFetchLimit}&home=1`, []);
 
   let all = [];
   let liveOk = false;
   if (navigator.onLine) {
     try {
-      const lists = await Promise.all(
-        HOME_FEEDS.map((feed) =>
-          fetchJSON(`${API_BASE}/articles?feed=${feed}&limit=${per}&home=1`)
-        )
-      );
-      all = lists.flat();
+      const raw = await fetchJSON(`${API_BASE}/articles?limit=${homeFetchLimit}&home=1`);
+      all = Array.isArray(raw) ? raw : [];
       liveOk = true;
       setStaleUI(false);
     } catch {
