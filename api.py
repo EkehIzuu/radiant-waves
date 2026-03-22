@@ -22,7 +22,7 @@ from google.cloud.firestore import Increment
 from google.oauth2 import service_account
 from google.api_core.exceptions import ResourceExhausted
 
-from article_filters import filter_home_articles, HOME_ARTICLE_MAX_AGE_DAYS
+from article_filters import filter_home_articles_with_fallback, HOME_ARTICLE_MAX_AGE_DAYS
 
 # ----------------- Config -----------------
 PROJECT_ID = (os.getenv("GOOGLE_CLOUD_PROJECT") or "").strip()
@@ -331,7 +331,7 @@ def list_articles():
     if cache_only:
         docs = _read_fast_local_articles()
         if home and not is_search:
-            docs = filter_home_articles(docs, limit=None)
+            docs = filter_home_articles_with_fallback(docs, max_age_days=HOME_ARTICLE_MAX_AGE_DAYS, limit=None)
         resp = jsonify(docs[:limit])
         resp.headers["X-Source"] = "disk"
         return resp
@@ -390,7 +390,7 @@ def list_articles():
         docs = [doc_to_public(d) for d in docs]
 
     if home and not is_search:
-        docs = filter_home_articles(docs, max_age_days=HOME_ARTICLE_MAX_AGE_DAYS, limit=None)
+        docs = filter_home_articles_with_fallback(docs, max_age_days=HOME_ARTICLE_MAX_AGE_DAYS, limit=None)
 
     _mem_set_articles(feed, q, docs, home)
 

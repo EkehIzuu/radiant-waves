@@ -118,3 +118,24 @@ def filter_home_articles(
     if limit is not None and limit > 0:
         out = out[:limit]
     return out
+
+
+def filter_home_articles_with_fallback(
+    docs: List[dict],
+    *,
+    max_age_days: Optional[int] = None,
+    limit: Optional[int] = None,
+) -> List[dict]:
+    """
+    Prefer good-image (+ optional age) rows; if that wipes the list (common when
+    imageUrl is empty on many ingests), return the same docs unchanged so the site
+    never goes blank — cards can use placeholders for missing images.
+    """
+    out = filter_home_articles(docs, max_age_days=max_age_days, limit=limit)
+    if out:
+        return out
+    if not docs:
+        return []
+    if limit is not None and limit > 0:
+        return docs[:limit]
+    return list(docs)

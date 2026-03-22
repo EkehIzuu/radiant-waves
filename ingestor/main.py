@@ -23,7 +23,7 @@ _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 from article_filters import (
-    filter_home_articles,
+    filter_home_articles_with_fallback,
     HOME_ARTICLE_MAX_AGE_DAYS,
     SNAPSHOT_HOME_SAMPLE_SIZE,
 )
@@ -767,7 +767,9 @@ def build_and_upload_snapshots():
 
     # 1) Home snapshot: wide sample → filter (newest window + decent image URL) → cap
     home_raw = _query_latest(SNAPSHOT_HOME_SAMPLE_SIZE, feed=None)
-    home_docs = filter_home_articles(home_raw, limit=SNAPSHOT_LIMIT_HOME)
+    home_docs = filter_home_articles_with_fallback(
+        home_raw, max_age_days=HOME_ARTICLE_MAX_AGE_DAYS, limit=SNAPSHOT_LIMIT_HOME
+    )
     home_payload = {
         "generatedAt": iso(now),
         "count": len(home_docs),

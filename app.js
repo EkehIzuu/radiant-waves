@@ -922,8 +922,10 @@ async function loadHome() {
   /* Broadcast-style: newest ingest first globally (not round-robin per feed) */
   all.sort((a, b) => ingestTimeMs(b) - ingestTimeMs(a));
   const mixedForText = all;
-  all = filterArticlesForHome(all);
-  const mixed = all;
+  let filtered = filterArticlesForHome(all);
+  /* If every row lacks a usable imageUrl, strict filter would blank the site — show stories anyway */
+  if (!filtered.length && all.length) filtered = all;
+  const mixed = filtered;
   els.status.textContent = "";
 
   const breaking = mixed[0] || null;
