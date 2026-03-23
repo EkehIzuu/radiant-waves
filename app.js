@@ -762,15 +762,18 @@ function pickTopStories(all, n = 6) {
 function pickLatestTextOnly(all, n = 6) {
   const out = [];
   const seen = new Set();
+  const fallback = [];
   for (const a of all) {
-    const noImg = !a.imageUrl || isLogoish(a.imageUrl);
-    if (!noImg) continue;
     const k = (a.title || "").toLowerCase().trim();
     if (!k || seen.has(k)) continue;
     seen.add(k);
-    out.push(a);
+    const noImg = !a.imageUrl || isLogoish(a.imageUrl);
+    if (noImg) out.push(a);
+    else fallback.push(a);
     if (out.length >= n) break;
   }
+  // Keep the "text-first" intent, but never leave this block empty.
+  if (out.length < n) out.push(...fallback.slice(0, n - out.length));
   return out;
 }
 
@@ -1168,10 +1171,17 @@ async function loadFeed({ append = false } = {}) {
       items = snap.items.slice(0, Math.min(loadedLimit, MAX_LIMIT));
       setStaleUI(false);
     } else {
-      setStaleUI(
-        !navigator.onLine,
-        navigator.onLine ? "no snapshot for this feed" : "offline — snapshot unavailable"
-      );
+      // If feed-specific files are thin/missing, show latest snapshot so tab is never blank.
+      const latest = await loadHomeSnapshot();
+      if (latest?.items?.length) {
+        items = latest.items.slice(0, Math.min(loadedLimit, MAX_LIMIT));
+        setStaleUI(true, `no ${currentFeed} snapshot yet — showing latest`);
+      } else {
+        setStaleUI(
+          !navigator.onLine,
+          navigator.onLine ? "no snapshot for this feed" : "offline — snapshot unavailable"
+        );
+      }
     }
   }
 
