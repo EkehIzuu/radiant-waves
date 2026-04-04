@@ -22,6 +22,56 @@ function snapshotUrlForFeed(feed) {
   return `${SNAPSHOT_CFG.feedBase.replace(/\/+$/, "/")}${encodeURIComponent(feed)}.json.gz`;
 }
 
+const SNAPSHOT_FEED_KEYS_FOR_ARTICLE = ["politics", "football", "celebrity"];
+
+/** Match article URLs across snapshot vs hash route (strip tracking, slash, hash). */
+function normalizeArticleUrlKey(raw) {
+  if (!raw || typeof raw !== "string") return "";
+  try {
+    const u = new URL(raw);
+    u.hash = "";
+    u.hostname = u.hostname.toLowerCase();
+    const drop = ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "fbclid", "gclid", "igshid"];
+    for (const k of drop) u.searchParams.delete(k);
+    let p = u.pathname;
+    if (p.length > 1 && p.endsWith("/")) p = p.slice(0, -1);
+    u.pathname = p;
+    return u.toString();
+  } catch {
+    return "";
+  }
+}
+
+/** Find metadata in GitHub snapshot(s) when API/extractor has no title. */
+async function findArticleInSnapshots(sourceUrl) {
+  const want = normalizeArticleUrlKey(sourceUrl);
+  if (!want) return null;
+
+  const urls = [];
+  if (SNAPSHOT_CFG.latestUrl) urls.push(SNAPSHOT_CFG.latestUrl);
+  for (const k of SNAPSHOT_FEED_KEYS_FOR_ARTICLE) {
+    const u = snapshotUrlForFeed(k);
+    if (u) urls.push(u);
+  }
+  const unique = [...new Set(urls)];
+
+  const batches = await Promise.all(
+    unique.map(async (u) => {
+      try {
+        const payload = await fetchSnapshotJson(u);
+        return Array.isArray(payload?.items) ? payload.items : [];
+      } catch {
+        return [];
+      }
+    })
+  );
+  for (const it of batches.flat()) {
+    const u = it?.url || it?.link || "";
+    if (normalizeArticleUrlKey(u) === want) return it;
+  }
+  return null;
+}
+
 function setStaleUI(on, meta = "") {
   if (!els.status) return;
   if (on) els.status.textContent = meta ? `Offline / stale • ${meta}` : "Offline / stale";
@@ -631,7 +681,9 @@ async function fetchArticleByUrl(sourceUrl) {
 }
 
 function normalizeArticlePayload(raw, fallback = {}) {
-  const title = stripTags(raw?.title || fallback?.title || "Article");
+  let t = stripTags(raw?.title || "");
+  if (!t || /^article$/i.test(t.trim())) t = stripTags(fallback?.title || "");
+  const title = t || "Article";
   const source = raw?.source || fallback?.source || "";
   const publishedAt = raw?.publishedAt || fallback?.publishedAt || fallback?.ingestedAt || "";
   const author = raw?.author || "";
@@ -656,8 +708,18 @@ async function showArticleView(sourceUrl = "") {
 
   const fallback = { title: "Article", url: sourceUrl };
 
-  const raw = await fetchArticleByUrl(sourceUrl);
-  const a = normalizeArticlePayload(raw || {}, fallback);
+  const [raw, snapArticle] = await Promise.all([
+    fetchArticleByUrl(sourceUrl),
+    findArticleInSnapshots(sourceUrl),
+  ]);
+  const snapFallback = {
+    ...fallback,
+    title: snapArticle?.title || fallback.title,
+    summary: snapArticle?.summary || fallback.summary,
+    imageUrl: snapArticle?.imageUrl || snapArticle?.image || fallback.imageUrl,
+    publishedAt: snapArticle?.publishedAt || snapArticle?.ingestedAt || fallback.publishedAt,
+  };
+  const a = normalizeArticlePayload(raw || {}, snapFallback);
 
   let heroImg = a.imageUrl;
   if (!heroImg && sourceUrl) {
@@ -710,17 +772,14 @@ async function showArticleView(sourceUrl = "") {
           ${
             hasContent
               ? `<div style="color:#101828;font-size:16px;line-height:1.75;white-space:pre-wrap;">${escapeHtml(a.contentText)}</div>`
-              : `<div style="margin-top:10px;color:#667085;font-size:14px;">
-                   Full content isn’t available from the extractor yet.
-                 </div>
-                 ${sourceUrl ? `
-                   <div style="margin-top:12px;">
+              : sourceUrl
+                ? `<div style="margin-top:10px;font-size:15px;line-height:1.5;">
                      <a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener"
-                        style="display:inline-flex;align-items:center;gap:8px;border:1px solid rgba(0,0,0,.10);background:#fff;border-radius:999px;padding:10px 14px;font-weight:900;text-decoration:none;color:#111;">
-                       Read original source →
+                        style="color:#204c6f;font-weight:800;text-decoration:underline;">
+                       view full story from the source
                      </a>
-                   </div>` : ``}
-                `
+                   </div>`
+                : ""
           }
         </div>
       </article>

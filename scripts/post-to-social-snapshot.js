@@ -7,11 +7,11 @@ const SNAPSHOT_LOCAL = path.join(process.cwd(), "snapshots", "latest.json.gz");
 const STATE_PATH = path.join(process.cwd(), "social_state.json");
 
 /**
- * Latest ingest list = same file ingest commits: snapshots/latest.json.gz on the default branch.
- * - SNAPSHOT_URL: explicit override (any HTTPS gzipped JSON).
- * - Else in GitHub Actions: raw.githubusercontent.com/OWNER/REPO/REF/snapshots/latest.json.gz
- *   (uses GITHUB_REPOSITORY + SNAPSHOT_REF or GITHUB_REF_NAME so each run pulls fresh snapshot, not stale checkout).
- * - Else local dev: read snapshots/latest.json.gz from disk.
+ * Article pool = snapshots/latest.json.gz + snapshots/feeds/{politics,football,celebrity}.json.gz (deduped by URL).
+ * - SNAPSHOT_URL: explicit override for latest (HTTPS .json.gz).
+ * - SNAPSHOT_FEED_BASE: optional override for feeds folder URL (…/snapshots/feeds/); else derived from latest URL.
+ * - Else in GitHub Actions: raw.githubusercontent.com/OWNER/REPO/REF/snapshots/latest.json.gz (+ feeds/).
+ * - Else local dev: snapshots/latest.json.gz and snapshots/feeds/*.json.gz on disk.
  */
 function resolveSnapshotFetchUrl() {
   const explicit = env("SNAPSHOT_URL");
@@ -22,6 +22,25 @@ function resolveSnapshotFetchUrl() {
     return `https://raw.githubusercontent.com/${repo}/${ref}/snapshots/latest.json.gz`;
   }
   return "";
+}
+
+/** Base URL for per-feed snapshots (…/snapshots/feeds/). Optional env or derived from latest.json.gz URL. */
+function resolveFeedBaseUrl() {
+  const explicit = env("SNAPSHOT_FEED_BASE");
+  if (explicit) return explicit.replace(/\/+$/, "/");
+  const latest = resolveSnapshotFetchUrl();
+  if (latest && latest.includes("latest.json.gz")) {
+    return latest.replace("latest.json.gz", "feeds/");
+  }
+  return "";
+}
+
+const SNAPSHOT_FEED_NAMES = ["politics", "football", "celebrity"];
+
+function parseSnapshotGzBuffer(gz) {
+  const raw = zlib.gunzipSync(gz).toString("utf8");
+  const data = JSON.parse(raw);
+  return Array.isArray(data?.items) ? data.items : [];
 }
 
 function env(name, fallback = "") {
@@ -115,30 +134,58 @@ async function fetchValidatedImageBuffer(imageUrl) {
   }
 }
 
+async function fetchRemoteGzJson(url) {
+  const bust = new URL(url);
+  bust.searchParams.set("_t", String(Date.now()));
+  const res = await fetch(bust.toString(), {
+    signal: AbortSignal.timeout(60000),
+    headers: {
+      "User-Agent": "RadiantWaves/1.0 (social)",
+      "Cache-Control": "no-cache",
+    },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const gz = Buffer.from(await res.arrayBuffer());
+  return parseSnapshotGzBuffer(gz);
+}
+
+/**
+ * Latest + per-feed gz files (same as site). Deduped by URL. Image quality still enforced in pickLatestUnposted / fetchValidatedImageBuffer.
+ */
 async function loadSnapshotItems() {
+  const merged = [];
+  const seen = new Set();
+
+  function pushDeduped(items) {
+    for (const it of items) {
+      const u = normalizeUrlForDedupe(it.url || it.link || "");
+      if (!u || seen.has(u)) continue;
+      seen.add(u);
+      merged.push(it);
+    }
+  }
+
   const snapshotUrl = resolveSnapshotFetchUrl();
+  const feedBase = resolveFeedBaseUrl();
 
   if (snapshotUrl) {
-    const bust = new URL(snapshotUrl);
-    bust.searchParams.set("_t", String(Date.now()));
-    const res = await fetch(bust.toString(), {
-      signal: AbortSignal.timeout(60000),
-      headers: {
-        "User-Agent": "RadiantWaves/1.0 (social)",
-        "Cache-Control": "no-cache",
-      },
-    });
-    if (!res.ok) throw new Error(`Snapshot fetch failed (${snapshotUrl}): ${res.status}`);
-    const gz = Buffer.from(await res.arrayBuffer());
-    const raw = zlib.gunzipSync(gz).toString("utf8");
-    const data = JSON.parse(raw);
-    const items = Array.isArray(data?.items) ? data.items : [];
-    if (data?.generatedAt) {
-      console.log("[snapshot] source=remote generatedAt=%s items=%d", data.generatedAt, items.length);
-    } else {
-      console.log("[snapshot] source=remote items=%d", items.length);
+    const homeItems = await fetchRemoteGzJson(snapshotUrl);
+    pushDeduped(homeItems);
+    console.log("[snapshot] remote latest items=%d", homeItems.length);
+
+    if (feedBase && /^https?:\/\//i.test(feedBase)) {
+      for (const name of SNAPSHOT_FEED_NAMES) {
+        const fu = `${feedBase}${encodeURIComponent(name)}.json.gz`;
+        try {
+          const feedItems = await fetchRemoteGzJson(fu);
+          pushDeduped(feedItems);
+          console.log("[snapshot] remote feed %s items=%d (merged total=%d)", name, feedItems.length, merged.length);
+        } catch (e) {
+          console.warn("[snapshot] skip feed %s: %s", name, e?.message || e);
+        }
+      }
     }
-    return items;
+    return merged;
   }
 
   if (!fs.existsSync(SNAPSHOT_LOCAL)) {
@@ -146,16 +193,21 @@ async function loadSnapshotItems() {
       "No snapshot source. In CI set GITHUB_REPOSITORY (auto) or SNAPSHOT_URL. Locally commit snapshots/latest.json.gz."
     );
   }
-  const gz = fs.readFileSync(SNAPSHOT_LOCAL);
-  const raw = zlib.gunzipSync(gz).toString("utf8");
-  const data = JSON.parse(raw);
-  const items = Array.isArray(data?.items) ? data.items : [];
-  if (data?.generatedAt) {
-    console.log("[snapshot] source=local file generatedAt=%s items=%d", data.generatedAt, items.length);
-  } else {
-    console.log("[snapshot] source=local file items=%d", items.length);
+  pushDeduped(parseSnapshotGzBuffer(fs.readFileSync(SNAPSHOT_LOCAL)));
+  const feedsDir = path.join(process.cwd(), "snapshots", "feeds");
+  if (fs.existsSync(feedsDir)) {
+    for (const name of fs.readdirSync(feedsDir)) {
+      if (!name.endsWith(".json.gz")) continue;
+      try {
+        const p = path.join(feedsDir, name);
+        pushDeduped(parseSnapshotGzBuffer(fs.readFileSync(p)));
+      } catch (e) {
+        console.warn("[snapshot] skip local feed file %s: %s", name, e?.message || e);
+      }
+    }
   }
-  return items;
+  console.log("[snapshot] source=local merged items=%d", merged.length);
+  return merged;
 }
 
 function parseTs(v) {
