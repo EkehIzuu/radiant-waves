@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block body %}
+<p style="color:#667">Category: {{ article.tag or article.category or 'Story' }} • {{ (article.publishedAt or '')|string }}</p>
+<h1 style="margin:.25rem 0 1rem">{{ article.cleanTitle or article.title }}</h1>
+<img src="{{ article.imageUrl or article.image }}" alt="" loading="eager">
+<p style="font-size:1.05rem;margin:1rem 0 0.75rem">{{ article.cleanSummary or article.excerpt or article.description }}</p>
+<p style="color:#667">Source: <a href="{{ article.link or article.url }}" rel="noopener nofollow" target="_blank">{{ article.source or (article.link or article.url) }}</a></p>
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+  <a class="chip" href="https://www.facebook.com/sharer/sharer.php?u={{ og_url|urlencode }}" target="_blank" rel="noopener">Share Facebook</a>
+  <a class="chip" href="https://twitter.com/intent/tweet?text={{ (article.title or 'Radiant Waves')|urlencode }}&url={{ og_url|urlencode }}" target="_blank" rel="noopener">Share X</a>
+  <a class="chip" href="https://api.whatsapp.com/send?text={{ (article.title or 'Radiant Waves')|urlencode }}%20{{ og_url|urlencode }}" target="_blank" rel="noopener">WhatsApp</a>
+  <a class="chip" href="https://t.me/share/url?url={{ og_url|urlencode }}&text={{ (article.title or 'Radiant Waves')|urlencode }}" target="_blank" rel="noopener">Telegram</a>
+</div>
+{% endblock %}

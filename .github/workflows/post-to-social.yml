@@ -1,0 +1,71 @@
+# Post latest ingest article from snapshots/latest.json.gz (same source as site home snapshot).
+# Fetches fresh JSON from raw.githubusercontent.com on each run (not the possibly stale checkout).
+name: Post to social (snapshot)
+
+# One run at a time so social_state.json push/rebase races don't drop posted_urls.
+concurrency:
+  group: post-to-social-${{ github.ref }}
+  cancel-in-progress: false
+
+on:
+  schedule:
+    # Every 3 hours 30 minutes (UTC)
+    - cron: "0 */7 * * *"
+    - cron: "30 3-23/7 * * *"
+  workflow_dispatch: # Allow manual run from Actions tab
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    # Prevent a stuck Meta/network step from running for hours (default job limit is very high).
+    timeout-minutes: 25
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Post from snapshot
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
+          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          # Optional: full URL to gzipped snapshot JSON. If unset, script uses:
+          # https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$SNAPSHOT_REF|GITHUB_REF_NAME/snapshots/latest.json.gz
+          SNAPSHOT_URL: ${{ vars.SNAPSHOT_URL }}
+          # Optional: branch name for raw URL (default: GITHUB_REF_NAME, e.g. main)
+          SNAPSHOT_REF: ${{ vars.SNAPSHOT_REF }}
+          SITE_URL: ${{ vars.SITE_URL }}
+          SHORTEN_LINK: ${{ vars.SHORTEN_LINK }}
+          # Default 1 when variable unset (repo root / Actions). Set var to 0 to disable.
+          # Optional: POST_TO_FACEBOOK_LINK_PREVIEW=1 enables link-preview fallback (may show site logo).
+          POST_TO_FACEBOOK_LINK_PREVIEW: ${{ vars.POST_TO_FACEBOOK_LINK_PREVIEW }}
+          POST_TO_FACEBOOK: ${{ vars.POST_TO_FACEBOOK || '1' }}
+          POST_TO_IG_STORY: ${{ vars.POST_TO_IG_STORY || '1' }}
+          POST_TO_FACEBOOK_STORY: ${{ vars.POST_TO_FACEBOOK_STORY || '1' }}
+          BITLY_ACCESS_TOKEN: ${{ secrets.BITLY_ACCESS_TOKEN }}
+          IMGBB_API_KEY: ${{ secrets.IMGBB_API_KEY }}
+        run: node scripts/post-to-social-snapshot.js
+
+      - name: Save social state back to repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # social_state.json may be modified by script; stash to rebase cleanly
+          git stash push -u -m "state" -- social_state.json || true
+          git pull --rebase
+          git stash pop || true
+          git add social_state.json
+          git diff --cached --quiet && echo "No state changes" && exit 0
+          git commit -m "chore: update social snapshot state"
+          git push

@@ -1,0 +1,1817 @@
+// app.js
+import {
+  API_BASE,
+  REFRESH_INTERVAL_MS,
+  YOUTUBE_LIVE_ID,
+  WEATHER_FALLBACK,
+  HOME_ARTICLE_MAX_AGE_DAYS,
+  fetchSnapshotJson
+} from "./settings.js";
+
+/* =========================================================
+   SNAPSHOT — fetch GitHub raw JSON only (no localStorage)
+========================================================= */
+const SNAPSHOT_CFG = {
+  latestUrl: (typeof window !== "undefined" && window.RW_SNAPSHOT_LATEST) ? String(window.RW_SNAPSHOT_LATEST) : "",
+  feedBase: (typeof window !== "undefined" && window.RW_SNAPSHOT_FEED_BASE) ? String(window.RW_SNAPSHOT_FEED_BASE) : "",
+};
+
+function snapshotUrlForFeed(feed) {
+  if (!feed) return "";
+  if (!SNAPSHOT_CFG.feedBase) return "";
+  return `${SNAPSHOT_CFG.feedBase.replace(/\/+$/, "/")}${encodeURIComponent(feed)}.json.gz`;
+}
+
+function setStaleUI(on, meta = "") {
+  if (!els.status) return;
+  if (on) els.status.textContent = meta ? `Offline / stale • ${meta}` : "Offline / stale";
+  else els.status.textContent = "";
+}
+
+/* =======================
+   INFINITE SCROLL CONFIG
+======================= */
+const PAGE_SIZE = 12;
+const MAX_LIMIT = 150;
+let loadedLimit = PAGE_SIZE;
+let infiniteObserver = null;
+let infiniteSentinel = null;
+let homeObserver = null;
+let homeSentinel = null;
+
+/* =======================
+   DOM
+======================= */
+const els = {
+  navLinks: document.querySelectorAll(".nav-link"),
+  form: document.getElementById("searchForm"),
+  q: document.getElementById("q"),
+  status: document.getElementById("status"),
+  home: document.getElementById("home"),
+  results: document.getElementById("results"),
+};
+
+let currentFeed = "";
+let currentView = "home"; // "home" | "match-center"
+/** Max rows per feed section on Home (politics / football / celebrity); infinite scroll grows toward this. */
+const HOME_SECTION_MAX = 200;
+const HOME_LIMIT = HOME_SECTION_MAX;
+/** Snapshot pool cap before splitting into sections (enough for 3×200). */
+const HOME_SNAPSHOT_POOL_MAX = 6000;
+const HOME_FEEDS_ORDER = ["politics", "football", "celebrity"];
+let homeLoadedLimit = 24;
+const POLL_MS = Number.isFinite(REFRESH_INTERVAL_MS) ? REFRESH_INTERVAL_MS : 30 * 60 * 1000;
+
+const FEED_TITLES = {
+  politics: "Politics",
+  football: "Football",
+  celebrity: "Celebrity",
+};
+
+/* =======================
+   UTILS
+======================= */
+function escapeHtml(s) {
+  return (s || "").replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;"
+  }[c]));
+}
+function stripTags(html) {
+  const tmp = document.createElement("div");
+  tmp.innerHTML = html || "";
+  return (tmp.textContent || tmp.innerText || "").trim();
+}
+function fmtTime(iso) {
+  if (!iso) return "";
+  try { return new Date(iso).toLocaleString(); } catch { return ""; }
+}
+function isLogoish(url) {
+  const s = String(url || "").toLowerCase();
+  return s.includes("logo") || s.includes("favicon") || s.includes("sprite") ||
+         s.includes("placeholder") || s.includes("default") || s.includes("brand") ||
+         s.endsWith(".svg");
+}
+/** Align with server article_filters + social script (home / snapshot) */
+function isLowQualityHomeImage(url) {
+  const s = String(url || "").toLowerCase();
+  if (!s || s.startsWith("data:")) return true;
+  if (isLogoish(url)) return true;
+  return /avatar|icon|1x1|spacer|pixel|tracking/.test(s);
+}
+function ingestTimeMs(a) {
+  return new Date(a?.ingestedAt || a?.publishedAt || 0).getTime();
+}
+function filterArticlesForHome(items, maxAgeDays = HOME_ARTICLE_MAX_AGE_DAYS) {
+  const useAge = Number(maxAgeDays) > 0;
+  const cutoff = useAge ? Date.now() - maxAgeDays * 86400000 : 0;
+  return (items || []).filter((a) => {
+    const ts = ingestTimeMs(a);
+    if (useAge && (!Number.isFinite(ts) || ts < cutoff)) return false;
+    const img = a.imageUrl || a.image || "";
+    if (!img || isLowQualityHomeImage(img)) return false;
+    return true;
+  });
+}
+function makePlaceholder(label = "News") {
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630">
+      <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stop-color="#0f1720"/><stop offset="100%" stop-color="#1e2935"/></linearGradient></defs>
+      <rect width="100%" height="100%" fill="url(#g)"/>
+      <g font-family="Inter, Segoe UI, Roboto, Arial, sans-serif" fill="#ff7a00" text-anchor="middle">
+        <text x="50%" y="45%" font-size="84" font-weight="800">RADIANT</text>
+        <text x="50%" y="58%" font-size="38" fill="#e5e7eb">${label}</text>
+      </g>
+    </svg>`;
+  return "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg);
+}
+
+/** GitHub Pages-safe base URL (keeps /radiant-waves/) */
+function baseSiteUrl() {
+  return `${location.origin}${location.pathname}`;
+}
+
+/* =======================
+   SOURCE LABEL (NEW)
+   - prevents "Google Alert - ..." from showing
+   - derives source from article URL domain
+======================= */
+function hostFromUrl(u) {
+  try { return new URL(u).hostname.replace(/^www\./, "").toLowerCase(); }
+  catch { return ""; }
+}
+
+function prettifyHost(host) {
+  if (!host) return "";
+
+  const map = {
+    "bbc.com": "BBC",
+    "bbc.co.uk": "BBC",
+    "punchng.com": "Punch",
+    "guardian.ng": "The Guardian",
+    "vanguardngr.com": "Vanguard",
+    "premiumtimesng.com": "Premium Times",
+    "dailypost.ng": "Daily Post",
+    "channels.tv": "Channels TV",
+    "thecable.ng": "TheCable",
+    "thenationonlineng.net": "The Nation",
+    "nairametrics.com": "Nairametrics",
+    "goal.com": "GOAL",
+    "skysports.com": "Sky Sports",
+    "espn.com": "ESPN",
+    "reuters.com": "Reuters",
+  };
+
+  if (map[host]) return map[host];
+
+  // handle subdomains: sports.bbc.co.uk -> bbc.co.uk
+  const parts = host.split(".");
+  const root2 = parts.slice(-2).join(".");
+  const root3 = parts.slice(-3).join(".");
+  if (map[root3]) return map[root3];
+  if (map[root2]) return map[root2];
+
+  // fallback: make readable from first segment
+  const name = host.split(".")[0] || host;
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
+function getCleanSource(a) {
+  const rawSource = String(
+    a?.sourceName || a?.publisher || a?.site || a?.origin || a?.source || ""
+  ).trim();
+
+  // Detect unwanted feed labels
+  const isFeedLabel = /google\s*alert|google\s*news|alert\s*-|feed\b|politics|football|celebrity/i.test(rawSource);
+
+  const host = hostFromUrl(a?.url || "");
+  const derived = prettifyHost(host);
+
+  // Prefer derived when source looks like a feed label OR is empty
+  if (derived && (isFeedLabel || !rawSource)) return derived;
+
+  // If it's a feed label and we can't derive, hide it
+  if (isFeedLabel) return "Source";
+
+  return rawSource || derived || "Source";
+}
+
+/* =======================
+   METRICS (Trending)
+======================= */
+const RW_METRIC_COOLDOWN_MS = 45 * 60 * 1000; // 45 mins per device per article per event
+
+function rwMetric(type, articleUrl) {
+  try {
+    if (!type || !articleUrl) return;
+
+    // simple per-device cooldown
+    const key = `rw_m_${type}_${articleUrl}`;
+    const last = Number(localStorage.getItem(key) || "0");
+    if (Date.now() - last < RW_METRIC_COOLDOWN_MS) return;
+    localStorage.setItem(key, String(Date.now()));
+
+    fetch(`${API_BASE}/metrics/event`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type, articleUrl, ts: Date.now() })
+    }).catch(() => {});
+  } catch {}
+}
+
+/* =======================
+   ROUTER (HASH) — Article independent view
+   - List/Home stay normal
+   - Article view uses: #/article?u=<encoded>
+======================= */
+function parseHashRoute() {
+  const raw = (location.hash || "").replace(/^#/, "");
+  if (!raw) return { route: "", params: new URLSearchParams() };
+
+  // raw like "/article?u=..."
+  const qIndex = raw.indexOf("?");
+  const route = (qIndex >= 0 ? raw.slice(0, qIndex) : raw).replace(/^\/+/, "");
+  const qs = qIndex >= 0 ? raw.slice(qIndex + 1) : "";
+  return { route, params: new URLSearchParams(qs) };
+}
+
+function getArticleParams() {
+  const { route, params } = parseHashRoute();
+  if (route !== "article") return { srcUrl: "" };
+  return { srcUrl: params.get("u") || "" };
+}
+
+function openArticleHash(url) {
+  if (!url) return "#";
+  return `#/article?u=${encodeURIComponent(url)}`;
+}
+
+function clearArticleRoute() {
+  // keep user at current page but remove article hash
+  if (location.hash && location.hash.startsWith("#/article")) {
+    history.pushState({}, "", `${baseSiteUrl()}${location.search || ""}#`);
+  }
+}
+
+function internalArticleUrl(a) {
+  // ✅ make every article “independent view”
+  return openArticleHash(a?.url || "");
+}
+
+/* =======================
+   FETCH (API)
+======================= */
+async function fetchJSON(u) {
+  const url = (u instanceof URL) ? u : new URL(u, API_BASE);
+  url.searchParams.set("_t", Date.now());
+  const res = await fetch(url.toString(), { cache: "no-store" });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+async function fetchJSONRelaxed(u, fallback = []) {
+  try { return await fetchJSON(u); }
+  catch { return Array.isArray(fallback) ? fallback : fallback; }
+}
+
+/* =======================
+   IMAGE PIPE
+======================= */
+function proxied(u) { return `${API_BASE}/img?url=${encodeURIComponent(u)}`; }
+
+const IMG_PICK_CACHE = new Map();
+let imgPickQueue = [];
+let imgPickActive = 0;
+const IMG_PICK_MAX = 4;
+
+function enqueueImagePick(articleUrl, imgEl) {
+  if (!articleUrl || !imgEl) return;
+
+  const cached = IMG_PICK_CACHE.get(articleUrl);
+  if (cached) {
+    imgEl.src = proxied(cached);
+    imgEl.dataset.lazy = "0";
+    return;
+  }
+
+  if (imgEl.dataset._pickQueued === "1") return;
+  imgEl.dataset._pickQueued = "1";
+
+  imgPickQueue.push({ articleUrl, imgEl });
+  pumpImagePickQueue();
+}
+
+async function pumpImagePickQueue() {
+  while (imgPickActive < IMG_PICK_MAX && imgPickQueue.length) {
+    const job = imgPickQueue.shift();
+    if (!job) break;
+
+    const { articleUrl, imgEl } = job;
+    if (!document.body.contains(imgEl)) continue;
+
+    imgPickActive++;
+    (async () => {
+      try {
+        const { imageUrl } = await fetchJSON(`${API_BASE}/pick_image?url=${encodeURIComponent(articleUrl)}`);
+        if (imageUrl && !isLogoish(imageUrl)) {
+          IMG_PICK_CACHE.set(articleUrl, imageUrl);
+          imgEl.src = proxied(imageUrl);
+          imgEl.dataset.lazy = "0";
+        }
+      } catch {
+        // ignore
+      } finally {
+        imgPickActive--;
+        if (imgEl && imgEl.dataset && imgEl.dataset.lazy === "1") imgEl.dataset._pickQueued = "0";
+        pumpImagePickQueue();
+      }
+    })();
+  }
+}
+
+let lazyImgObserver = null;
+function setupLazyImageObserver() {
+  if (lazyImgObserver) return;
+
+  lazyImgObserver = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      if (!e.isIntersecting) continue;
+      const img = e.target;
+      lazyImgObserver.unobserve(img);
+
+      const url = img?.dataset?.articleUrl || img?.dataset?.articleUrlLower || img?.dataset?.articleurl || img?.dataset?.articleUrl || "";
+      if (url) enqueueImagePick(url, img);
+    }
+  }, { rootMargin: "600px 0px" });
+}
+
+function hydrateLazyImages(root) {
+  setupLazyImageObserver();
+  const imgs = (root || document).querySelectorAll('img[data-lazy="1"]');
+  imgs.forEach(img => lazyImgObserver.observe(img));
+}
+
+/* =======================
+   SHARE (FIXED)
+   - uses Web Share API when available
+   - otherwise copies link + shows small status message
+======================= */
+function pageUrlForShare(articleUrl) {
+  // Share the WEBSITE URL (not API_BASE), so it works on WhatsApp etc.
+  // It will open directly into the article view.
+  return `${baseSiteUrl()}${location.search || ""}${openArticleHash(articleUrl)}`;
+}
+
+function sharePayloadFromDataset(btn) {
+  const title = btn?.dataset?.title || "Radiant Waves";
+  const articleUrl = btn?.dataset?.articleUrl || btn?.dataset?.url || "";
+  const shareUrl = btn?.dataset?.shareUrl || (articleUrl ? pageUrlForShare(articleUrl) : "");
+  return { title, text: title, url: shareUrl };
+}
+
+async function copyToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.left = "-9999px";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      ta.remove();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+function toast(msg) {
+  // minimal: reuse status bar so no extra CSS needed
+  if (!els.status) return;
+  const old = els.status.textContent;
+  els.status.textContent = msg;
+  setTimeout(() => {
+    if (els.status.textContent === msg) els.status.textContent = old || "";
+  }, 1600);
+}
+
+function closeAllShareMenus() {
+  document.querySelectorAll(".rw-share-menu").forEach(m => m.remove());
+}
+
+function shareUrls({ url, title }) {
+  const u = encodeURIComponent(url);
+  const t = encodeURIComponent(title);
+  return {
+    whatsapp: `https://wa.me/?text=${t}%20${u}`,
+    facebook: `https://www.facebook.com/sharer/sharer.php?u=${u}`,
+    instagram: `https://www.instagram.com/`,
+    tiktok: `https://www.tiktok.com/`,
+  };
+}
+
+function openShareMenu(btn) {
+  closeAllShareMenus();
+
+  const payload = sharePayloadFromDataset(btn);
+  if (!payload.url) return;
+
+  const links = shareUrls({ url: payload.url, title: payload.title });
+
+  const menu = document.createElement("div");
+  menu.className = "rw-share-menu";
+  menu.innerHTML = `
+    <button class="rw-share-item" data-act="native" type="button">Share…</button>
+    <button class="rw-share-item" data-act="copy" type="button">Copy link</button>
+    <a class="rw-share-item" data-act="wa" href="${links.whatsapp}" target="_blank" rel="noopener">WhatsApp</a>
+    <a class="rw-share-item" data-act="fb" href="${links.facebook}" target="_blank" rel="noopener">Facebook</a>
+    <button class="rw-share-item" data-act="ig" type="button">Instagram</button>
+    <button class="rw-share-item" data-act="tt" type="button">TikTok</button>
+  `;
+
+  const rect = btn.getBoundingClientRect();
+  menu.style.position = "fixed";
+  menu.style.zIndex = "9999";
+  menu.style.minWidth = "170px";
+  menu.style.borderRadius = "10px";
+  menu.style.boxShadow = "0 12px 30px rgba(0,0,0,.15)";
+  menu.style.background = "#fff";
+  menu.style.border = "1px solid rgba(0,0,0,.08)";
+  menu.style.padding = "8px";
+  menu.style.display = "grid";
+  menu.style.gap = "6px";
+
+  // keep inside viewport
+  const idealTop = rect.bottom + 8;
+  const idealLeft = rect.left;
+  const maxLeft = window.innerWidth - 12 - 180;
+  const left = Math.max(12, Math.min(idealLeft, maxLeft));
+  const maxTop = window.innerHeight - 12 - 260;
+  const top = Math.max(12, Math.min(idealTop, maxTop));
+
+  menu.style.top = `${top}px`;
+  menu.style.left = `${left}px`;
+
+  menu.querySelectorAll(".rw-share-item").forEach(el => {
+    el.style.display = "flex";
+    el.style.alignItems = "center";
+    el.style.justifyContent = "center";
+    el.style.gap = "8px";
+    el.style.padding = "10px 10px";
+    el.style.borderRadius = "10px";
+    el.style.border = "1px solid rgba(0,0,0,.08)";
+    el.style.background = "#fff";
+    el.style.cursor = "pointer";
+    el.style.textDecoration = "none";
+    el.style.color = "#111";
+    el.style.fontWeight = "700";
+    el.style.fontSize = "13px";
+  });
+
+  document.body.appendChild(menu);
+
+  menu.addEventListener("click", async (e) => {
+    const el = e.target.closest(".rw-share-item");
+    if (!el) return;
+
+    const act = el.dataset.act;
+
+    if (act === "native") {
+      if (navigator.share) {
+        try { await navigator.share(payload); } catch {}
+      } else {
+        await copyToClipboard(payload.url);
+        toast("Link copied ✅");
+      }
+
+      // ✅ metrics: share
+      const aUrl = btn?.dataset?.articleUrl || "";
+      if (aUrl) rwMetric("share", aUrl);
+
+      closeAllShareMenus();
+      return;
+    }
+
+    if (act === "copy") {
+      await copyToClipboard(payload.url);
+      toast("Link copied ✅");
+
+      // ✅ metrics: share
+      const aUrl = btn?.dataset?.articleUrl || "";
+      if (aUrl) rwMetric("share", aUrl);
+
+      closeAllShareMenus();
+      return;
+    }
+
+    if (act === "ig") {
+      await copyToClipboard(payload.url);
+      toast("Link copied ✅ (paste on IG)");
+      window.open(links.instagram, "_blank", "noopener");
+
+      // ✅ metrics: share
+      const aUrl = btn?.dataset?.articleUrl || "";
+      if (aUrl) rwMetric("share", aUrl);
+
+      closeAllShareMenus();
+      return;
+    }
+
+    if (act === "tt") {
+      await copyToClipboard(payload.url);
+      toast("Link copied ✅ (paste on TikTok)");
+      window.open(links.tiktok, "_blank", "noopener");
+
+      // ✅ metrics: share
+      const aUrl = btn?.dataset?.articleUrl || "";
+      if (aUrl) rwMetric("share", aUrl);
+
+      closeAllShareMenus();
+      return;
+    }
+
+    closeAllShareMenus();
+  });
+
+  setTimeout(() => {
+    const onDoc = (ev) => {
+      if (!menu.contains(ev.target) && ev.target !== btn) closeAllShareMenus();
+    };
+    const onKey = (ev) => {
+      if (ev.key === "Escape") closeAllShareMenus();
+    };
+    document.addEventListener("click", onDoc, { once: true });
+    document.addEventListener("keydown", onKey, { once: true });
+  }, 0);
+}
+
+/* =======================
+   CARDS
+======================= */
+function shareBtnHtml(a) {
+  const title = escapeHtml(stripTags(a.title || "Radiant Waves"));
+  const articleUrl = escapeHtml(a.url || "");
+  // Use your CSS class .share-btn (and keep .rw-share-btn for compatibility)
+  return `
+    <button class="share-btn rw-share-btn" type="button"
+      aria-label="Share"
+      data-title="${title}"
+      data-article-url="${articleUrl}">
+      <i class="fas fa-share"></i> Share
+    </button>
+  `;
+}
+
+function cardHtml(a, { sectionLabel = "News" } = {}) {
+  const titleText = stripTags(a.title || "(untitled)");
+  const summaryText = stripTags(a.summary || "").slice(0, 240);
+
+  let imgSrc = "";
+  let lazyAttr = "";
+  if (a.imageUrl && !isLogoish(a.imageUrl)) {
+    imgSrc = proxied(a.imageUrl);
+  } else {
+    imgSrc = makePlaceholder(sectionLabel);
+    lazyAttr = ` data-lazy="1" data-article-url="${escapeHtml(a.url || "")}"`;
+  }
+
+  const href = internalArticleUrl(a); // ✅ hash route
+
+  return `
+    <li class="card">
+      <div class="thumb-wrap">
+        <img class="thumb" src="${imgSrc}" alt="" loading="lazy" decoding="async"
+             onerror="this.dataset.fallback='1'; this.src='${makePlaceholder(sectionLabel)}';"${lazyAttr}>
+        <div class="headline-overlay">
+          <a class="title headline-title" href="${href}">${escapeHtml(titleText)}</a>
+        </div>
+      </div>
+      <div class="content">
+        <div class="meta" style="display:flex;align-items:center;gap:10px;">
+          <span>Source: ${escapeHtml(getCleanSource(a))} • ${escapeHtml(fmtTime(a.publishedAt))}</span>
+          <span style="margin-left:auto;display:inline-flex;">${shareBtnHtml(a)}</span>
+        </div>
+        <p class="summary">${escapeHtml(summaryText)}</p>
+      </div>
+    </li>`;
+}
+
+function renderEmptyState(container, msg = "No articles available right now.") {
+  container.innerHTML = `<li class="card" style="padding:16px; text-align:center;">${escapeHtml(msg)}</li>`;
+}
+
+/* =======================
+   ARTICLE READER (FULL VIEW)
+======================= */
+async function fetchArticleByUrl(sourceUrl) {
+  if (!sourceUrl) return null;
+
+  const attempts = [
+    `${API_BASE}/article?url=${encodeURIComponent(sourceUrl)}`,
+    `${API_BASE}/read?url=${encodeURIComponent(sourceUrl)}`,
+    `${API_BASE}/extract?url=${encodeURIComponent(sourceUrl)}`,
+  ];
+
+  for (const u of attempts) {
+    try {
+      const data = await fetchJSON(u);
+      if (data && typeof data === "object") return data;
+    } catch {}
+  }
+  return null;
+}
+
+function normalizeArticlePayload(raw, fallback = {}) {
+  const title = stripTags(raw?.title || fallback?.title || "Article");
+  const source = raw?.source || fallback?.source || "";
+  const publishedAt = raw?.publishedAt || fallback?.publishedAt || fallback?.ingestedAt || "";
+  const author = raw?.author || "";
+  const imageUrl = raw?.imageUrl || raw?.image || fallback?.imageUrl || "";
+  const summary = stripTags(raw?.summary || raw?.description || fallback?.summary || "");
+  const contentText = stripTags(raw?.content || raw?.body || raw?.text || raw?.article || raw?.html || "");
+  return { title, source, publishedAt, author, imageUrl, summary, contentText };
+}
+
+async function showArticleView(sourceUrl = "") {
+  stopInfiniteScroll();
+  stopHomeInfinite();
+  closeAllShareMenus();
+
+  // ✅ metrics: count a view (cooldown handled client-side)
+  if (sourceUrl) rwMetric("view", sourceUrl);
+
+  els.status.textContent = "Loading article…";
+  els.results.innerHTML = "";
+  els.results.style.display = "none";
+  els.home.style.display = "";
+
+  const fallback = { title: "Article", url: sourceUrl };
+
+  const raw = await fetchArticleByUrl(sourceUrl);
+  const a = normalizeArticlePayload(raw || {}, fallback);
+
+  let heroImg = a.imageUrl;
+  if (!heroImg && sourceUrl) {
+    try {
+      const picked = await fetchJSON(`${API_BASE}/pick_image?url=${encodeURIComponent(sourceUrl)}`);
+      if (picked?.imageUrl && !isLogoish(picked.imageUrl)) heroImg = picked.imageUrl;
+    } catch {}
+  }
+
+  const heroSrc = heroImg && !isLogoish(heroImg) ? proxied(heroImg) : makePlaceholder("Article");
+  const hasContent = Boolean((a.contentText || "").trim().length);
+
+  const shareUrl = pageUrlForShare(sourceUrl);
+
+  els.home.innerHTML = `
+    <section class="rw-article" style="max-width:980px;margin:16px auto;padding:0 12px;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+        <button id="rwBackBtn" type="button"
+          style="border:1px solid rgba(0,0,0,.10);background:#fff;border-radius:999px;padding:8px 12px;cursor:pointer;font-weight:800;">
+          ← Back
+        </button>
+
+        <button class="share-btn rw-share-btn" type="button"
+          data-title="${escapeHtml(a.title)}"
+          data-share-url="${escapeHtml(shareUrl)}"
+          data-article-url="${escapeHtml(sourceUrl)}">
+          <i class="fas fa-share"></i> Share
+        </button>
+      </div>
+
+      <article style="background:var(--card,#fff);border:1px solid rgba(0,0,0,.06);border-radius:16px;overflow:hidden;box-shadow:var(--shadow,0 12px 30px rgba(0,0,0,.10));">
+        <img src="${heroSrc}" alt="" style="width:100%;height:360px;object-fit:cover;display:block;"
+             loading="lazy" decoding="async"
+             onerror="this.src='${makePlaceholder("Article")}';">
+
+        <div style="padding:16px 16px 18px;">
+          <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;color:#667085;font-size:13px;font-weight:700;">
+            <span>Source: ${escapeHtml(getCleanSource({ ...a, url: sourceUrl }))}</span>
+            <span>•</span>
+            <span>${escapeHtml(fmtTime(a.publishedAt))}</span>
+            ${a.author ? `<span>•</span><span>${escapeHtml(a.author)}</span>` : ``}
+          </div>
+
+          <h1 style="margin:10px 0 10px;font-size:clamp(22px,4vw,34px);line-height:1.15;">
+            ${escapeHtml(a.title)}
+          </h1>
+
+          ${a.summary ? `<p style="margin:0 0 14px;color:#344054;font-size:16px;line-height:1.55;">${escapeHtml(a.summary)}</p>` : ""}
+
+          ${
+            hasContent
+              ? `<div style="color:#101828;font-size:16px;line-height:1.75;white-space:pre-wrap;">${escapeHtml(a.contentText)}</div>`
+              : `<div style="margin-top:10px;color:#667085;font-size:14px;">
+                   Full content isn’t available from the extractor yet.
+                 </div>
+                 ${sourceUrl ? `
+                   <div style="margin-top:12px;">
+                     <a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener"
+                        style="display:inline-flex;align-items:center;gap:8px;border:1px solid rgba(0,0,0,.10);background:#fff;border-radius:999px;padding:10px 14px;font-weight:900;text-decoration:none;color:#111;">
+                       Read original source →
+                     </a>
+                   </div>` : ``}
+                `
+          }
+        </div>
+      </article>
+    </section>
+  `;
+
+  const backBtn = document.getElementById("rwBackBtn");
+  if (backBtn) {
+    backBtn.addEventListener("click", () => {
+      clearArticleRoute();
+      // restore to home
+      currentView = "home";
+      currentFeed = "";
+      els.q.value = "";
+      els.navLinks.forEach(a => {
+        a.classList.remove("active");
+        a.removeAttribute("aria-current");
+      });
+      const homeLink = [...els.navLinks].find(x => (x.dataset.feed || "") === "" && !x.dataset.view);
+      if (homeLink) {
+        homeLink.classList.add("active");
+        homeLink.setAttribute("aria-current", "page");
+      }
+      safeLoad();
+    });
+  }
+
+  els.status.textContent = "";
+}
+
+/* =======================
+   HOME BLOCKS
+======================= */
+function pickTopStories(all, n = 6) {
+  const pool = all;
+  const seen = new Set();
+  const out = [];
+  for (const a of pool) {
+    const k = (a.title || "").toLowerCase().trim();
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    out.push(a);
+    if (out.length >= n) break;
+  }
+  return out;
+}
+
+function pickLatestTextOnly(all, n = 6) {
+  const out = [];
+  const seen = new Set();
+  const fallback = [];
+  for (const a of all) {
+    const k = (a.title || "").toLowerCase().trim();
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    const noImg = !a.imageUrl || isLogoish(a.imageUrl);
+    if (noImg) out.push(a);
+    else fallback.push(a);
+    if (out.length >= n) break;
+  }
+  // Keep the "text-first" intent, but never leave this block empty.
+  if (out.length < n) out.push(...fallback.slice(0, n - out.length));
+  return out;
+}
+
+async function getWeather() {
+  const fallback = WEATHER_FALLBACK || { name: "Lagos", lat: 6.5244, lon: 3.3792 };
+
+  const coords = await new Promise(resolve => {
+    if (!navigator.geolocation) return resolve(fallback);
+    navigator.geolocation.getCurrentPosition(
+      pos => resolve({ name: "Your location", lat: pos.coords.latitude, lon: pos.coords.longitude }),
+      () => resolve(fallback),
+      { enableHighAccuracy: false, timeout: 4000, maximumAge: 60_000 }
+    );
+  });
+
+  const url = new URL("https://api.open-meteo.com/v1/forecast");
+  url.searchParams.set("latitude", coords.lat);
+  url.searchParams.set("longitude", coords.lon);
+  url.searchParams.set("current", "temperature_2m,weather_code,wind_speed_10m");
+  url.searchParams.set("timezone", "auto");
+
+  try {
+    const r = await fetch(url.toString(), { cache: "no-store" });
+    const data = await r.json();
+    const cur = data?.current || {};
+    return { ok: true, name: coords.name, temp: cur.temperature_2m, wind: cur.wind_speed_10m, code: cur.weather_code };
+  } catch {
+    return { ok: false, name: coords.name };
+  }
+}
+
+function weatherText(code) {
+  const map = {
+    0: "Clear", 1: "Mostly clear", 2: "Partly cloudy", 3: "Overcast",
+    45: "Fog", 48: "Rime fog",
+    51: "Light drizzle", 53: "Drizzle", 55: "Heavy drizzle",
+    61: "Light rain", 63: "Rain", 65: "Heavy rain",
+    71: "Light snow", 73: "Snow", 75: "Heavy snow",
+    80: "Rain showers", 81: "Showers", 82: "Violent showers",
+    95: "Thunderstorm",
+  };
+  return map[code] || "Weather";
+}
+
+/* =======================
+   SNAPSHOT LOADERS
+======================= */
+async function loadHomeSnapshot() {
+  if (!SNAPSHOT_CFG.latestUrl) return null;
+  try {
+    const payload = await fetchSnapshotJson(SNAPSHOT_CFG.latestUrl);
+    if (payload && Array.isArray(payload.items)) {
+      return payload;
+    }
+  } catch (e) {
+    console.warn("[snapshot] home load failed:", e?.message || e);
+  }
+  return null;
+}
+
+function normalizeFeedKey(f) {
+  return String(f || "").trim().toLowerCase();
+}
+
+/** Split snapshot items into politics / football / celebrity (unknown → politics). */
+function partitionByFeed(items) {
+  const out = { politics: [], football: [], celebrity: [] };
+  for (const a of items || []) {
+    const f = normalizeFeedKey(a.feed);
+    if (f === "football") out.football.push(a);
+    else if (f === "celebrity") out.celebrity.push(a);
+    else out.politics.push(a);
+  }
+  for (const k of HOME_FEEDS_ORDER) {
+    out[k].sort((a, b) => ingestTimeMs(b) - ingestTimeMs(a));
+  }
+  return out;
+}
+
+function buildHomeCategorySections(parts) {
+  let html = "";
+  for (const key of HOME_FEEDS_ORDER) {
+    const label = FEED_TITLES[key] || key;
+    let arr = parts[key] || [];
+    let filtered = filterArticlesForHome(arr);
+    if (!filtered.length && arr.length) filtered = arr;
+    const cap = Math.min(homeLoadedLimit, HOME_SECTION_MAX);
+    const slice = filtered.slice(0, cap);
+    html += `
+      <section class="rw-more-wrapper rw-home-feed-block" data-home-feed="${escapeHtml(key)}">
+        <div class="rw-section-title">
+          <h2>${escapeHtml(label)}</h2>
+          <span style="opacity:.75;font-size:14px;font-weight:600;">${slice.length} stor${slice.length === 1 ? "y" : "ies"}</span>
+        </div>`;
+    if (!slice.length) {
+      html += `<p style="padding:16px;color:var(--muted,#666);">No ${escapeHtml(label.toLowerCase())} stories in the snapshot yet.</p>`;
+    } else {
+      html += `<ul class="rw-more-grid">${slice.map((a) => cardHtml(a, { sectionLabel: label })).join("")}</ul>`;
+    }
+    html += `</section>`;
+  }
+  return `<div class="rw-home-category-wrap" style="margin-top:28px;display:flex;flex-direction:column;gap:32px;">${html}</div>`;
+}
+
+/**
+ * Per-feed file: snapshots/feeds/{feed}.json.gz (written by ingest).
+ * If missing (404) or empty, fall back to home snapshot latest.json.gz and filter by `feed`.
+ */
+async function loadFeedSnapshot(feed) {
+  const key = normalizeFeedKey(feed);
+  if (!key) return null;
+
+  const url = snapshotUrlForFeed(feed);
+  if (url) {
+    try {
+      const payload = await fetchSnapshotJson(url);
+      if (payload && Array.isArray(payload.items) && payload.items.length) {
+        return payload;
+      }
+    } catch (e) {
+      console.warn("[snapshot] per-feed file missing or empty, trying latest.json filter:", key, e?.message || e);
+    }
+  }
+
+  if (!SNAPSHOT_CFG.latestUrl) return null;
+  try {
+    const payload = await fetchSnapshotJson(SNAPSHOT_CFG.latestUrl);
+    if (!payload || !Array.isArray(payload.items)) return null;
+    const items = payload.items.filter((a) => normalizeFeedKey(a.feed) === key);
+    return {
+      ...payload,
+      items,
+      count: items.length,
+      _feedFilter: key,
+    };
+  } catch (e) {
+    console.warn("[snapshot] feed fallback from latest failed:", key, e?.message || e);
+  }
+  return null;
+}
+
+async function loadHome() {
+  stopInfiniteScroll();
+  els.status.textContent = "Loading…";
+
+  /* GitHub snapshot (RW_SNAPSHOT_LATEST) — no API fallback, no localStorage */
+  const snapshot = await loadHomeSnapshot();
+  const snapshotItems = snapshot?.items?.length ? snapshot.items : [];
+  const pool = snapshotItems.length
+    ? snapshotItems.slice(0, Math.min(snapshotItems.length, HOME_SNAPSHOT_POOL_MAX))
+    : [];
+
+  if (!snapshotItems.length) {
+    setStaleUI(!navigator.onLine, navigator.onLine ? "no snapshot yet" : "offline — snapshot unavailable");
+  } else {
+    setStaleUI(false);
+  }
+
+  /* Hero / breaking / sidebar: all feeds combined, newest first */
+  let all = [...pool].sort((a, b) => ingestTimeMs(b) - ingestTimeMs(a));
+  const mixedForText = all;
+  let filtered = filterArticlesForHome(all);
+  if (!filtered.length && all.length) filtered = all;
+  const mixed = filtered;
+
+  const parts = partitionByFeed(pool);
+  const categorySectionsHtml = buildHomeCategorySections(parts);
+
+  const breaking = mixed[0] || null;
+  const topStories = pickTopStories(mixed, 150);
+  const heroStories = topStories.slice(0, 4);
+  const latestText = pickLatestTextOnly(mixedForText, 7);
+  const weather = await getWeather();
+
+  const yt = (YOUTUBE_LIVE_ID || "").trim();
+  const broadcastVideo = yt
+    ? `<iframe src="https://www.youtube.com/embed/${encodeURIComponent(yt)}?autoplay=0&mute=0"
+         title="Radiant Waves Live"
+         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+         allowfullscreen
+         style="width:100%;height:500px;border:0;display:block;"></iframe>`
+    : `<div class="broadcast-fallback" style="height:500px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;">
+         <i class="fab fa-youtube" style="font-size:54px;color:#ff2a2a;margin-bottom:12px;"></i>
+         <h3 style="margin:0 0 6px;">Live Broadcast</h3>
+         <p style="margin:0;color:rgba(255,255,255,.8);text-align:center;max-width:520px;padding:0 16px;">
+           Set <b>YOUTUBE_LIVE_ID</b> in <b>settings.js</b> to show your stream here.
+         </p>
+       </div>`;
+
+  const breakingHtml = breaking ? `
+    <div class="breaking-news">
+      <h3><i class="fas fa-exclamation-circle"></i> BREAKING</h3>
+      <a href="${internalArticleUrl(breaking)}">${escapeHtml(stripTags(breaking.title))}</a>
+      <p>${escapeHtml(stripTags(breaking.summary || "").slice(0, 140))}</p>
+      <div style="margin-top:10px;display:flex;gap:10px;align-items:center;">
+        ${shareBtnHtml(breaking)}
+      </div>
+    </div>
+  ` : "";
+
+  const weatherHtml = `
+    <div class="weather-widget">
+      <div class="weather-header">
+        <h3><i class="fas fa-cloud-sun"></i> Weather</h3>
+        <span class="weather-meta">${escapeHtml(weather.name || "Location")}</span>
+      </div>
+      ${
+        weather.ok
+          ? `<div class="weather-info">
+               <div class="temperature">${Math.round(weather.temp)}°</div>
+               <div class="weather-meta">
+                 <div>${escapeHtml(weatherText(weather.code))}</div>
+                 <div><i class="fas fa-wind"></i> Wind: ${Math.round(weather.wind)} km/h</div>
+               </div>
+             </div>`
+          : `<div class="weather-meta">Weather unavailable right now.</div>`
+      }
+    </div>
+  `;
+
+  const heroGrid = heroStories.length
+    ? heroStories.map(a => {
+        const title = stripTags(a.title || "");
+        const sum = stripTags(a.summary || "");
+        const img = a.imageUrl && !isLogoish(a.imageUrl) ? proxied(a.imageUrl) : makePlaceholder("Top");
+        const feed = escapeHtml((a.feed || "").toUpperCase() || "TOP");
+        return `
+          <article class="news-card">
+            <a href="${internalArticleUrl(a)}" aria-label="${escapeHtml(title)}">
+              <img src="${img}" alt="" loading="lazy" decoding="async"
+                   ${(!a.imageUrl || isLogoish(a.imageUrl)) ? `data-lazy="1" data-article-url="${escapeHtml(a.url || "")}"` : ""}>
+            </a>
+            <div class="news-card-content">
+              <div class="news-category">${feed}</div>
+              <h3>
+                <a href="${internalArticleUrl(a)}" style="text-decoration:none;color:inherit;">
+                  ${escapeHtml(title)}
+                </a>
+              </h3>
+              <p>${escapeHtml(sum)}</p>
+              <div class="news-meta" style="display:flex;gap:10px;align-items:center;">
+                <span><i class="far fa-clock"></i> ${escapeHtml(fmtTime(a.publishedAt))}</span>
+                <span style="opacity:.8;">Source: ${escapeHtml(getCleanSource(a))}</span>
+                ${shareBtnHtml(a)}
+              </div>
+            </div>
+          </article>
+        `;
+      }).join("")
+    : `<div class="card" style="padding:14px;">No top stories yet.</div>`;
+
+  const latestList = latestText.length
+    ? latestText.map(a => {
+        const title = stripTags(a.title || "");
+        const sum = stripTags(a.summary || "");
+        return `
+          <li style="display:flex;gap:10px;align-items:flex-start;justify-content:space-between;">
+            <div style="min-width:0;">
+              <a href="${internalArticleUrl(a)}" style="font-weight:800;color:#111;text-decoration:none;">
+                ${escapeHtml(title)}
+              </a>
+              <div class="small" style="margin-top:4px;color:#666;font-size:13px;">
+                ${escapeHtml(sum)}
+              </div>
+            </div>
+            <div style="flex:0 0 auto;">
+              ${shareBtnHtml(a)}
+            </div>
+          </li>
+        `;
+      }).join("")
+    : `<li style="padding:12px 14px; color: var(--muted);">No text-only updates.</li>`;
+
+  els.home.innerHTML = `
+    <div class="home-shell">
+      <div class="main-content">
+        <div class="left-column">
+          <section class="live-broadcast">
+            <div class="rw-section-title">
+              <h2>Live Broadcast</h2>
+              <span class="rw-badge">LIVE</span>
+            </div>
+            <div class="broadcast-card">
+              <div class="broadcast-video" style="background:#000;">
+                ${broadcastVideo}
+              </div>
+              <div class="broadcast-info">
+                <div>
+                  <h3>Radiant Waves Live</h3>
+                  <p>Breaking updates • Top stories • Football coverage</p>
+                </div>
+                <div class="broadcast-stats">
+                  <span><i class="fas fa-signal"></i> ${yt ? "Online" : "Offline"}</span>
+                  <span>
+                    <button class="share-btn rw-share-btn" type="button"
+                      data-title="Radiant Waves Live"
+                      data-share-url="${escapeHtml(baseSiteUrl())}"
+                      data-article-url="">
+                      <i class="fas fa-share"></i> Share
+                    </button>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="top-news">
+            <div class="rw-section-title">
+              <h2>Top Stories</h2>
+            </div>
+            <div class="top-news-grid">
+              ${heroGrid}
+            </div>
+          </section>
+        </div>
+
+        <div class="right-column">
+          ${breakingHtml}
+          ${weatherHtml}
+
+          <section class="news-sidebar">
+            <div class="rw-section-title">
+              <h2>Latest Updates</h2>
+            </div>
+            <ul class="sidebar-list">
+              ${latestList}
+            </ul>
+          </section>
+        </div>
+      </div>
+      ${categorySectionsHtml}
+    </div>
+  `;
+
+  hydrateLazyImages(els.home);
+  setupHomeInfinite();
+
+  els.results.innerHTML = "";
+  els.results.style.display = "none";
+  els.home.style.display = "";
+}
+
+/* =======================
+   INFINITE SCROLL
+======================= */
+function stopHomeInfinite() {
+  if (homeObserver) { homeObserver.disconnect(); homeObserver = null; }
+  if (homeSentinel) { homeSentinel.remove(); homeSentinel = null; }
+}
+function setupHomeInfinite() {
+  stopHomeInfinite();
+  if (els.home.style.display === "none") return;
+  if (homeLoadedLimit >= HOME_LIMIT) return;
+
+  homeSentinel = document.createElement("div");
+  homeSentinel.id = "homeSentinel";
+  homeSentinel.style.height = "1px";
+  homeSentinel.style.width = "100%";
+  homeSentinel.style.margin = "16px 0";
+  els.home.appendChild(homeSentinel);
+
+  homeObserver = new IntersectionObserver(async (entries) => {
+    if (!entries.some(e => e.isIntersecting)) return;
+    if (inflight) return;
+    const next = Math.min(homeLoadedLimit + PAGE_SIZE, HOME_LIMIT);
+    if (next === homeLoadedLimit) return;
+    const prevY = window.scrollY;
+    homeLoadedLimit = next;
+    await loadHome();
+    window.scrollTo(0, prevY);
+  }, { rootMargin: "900px 0px" });
+
+  homeObserver.observe(homeSentinel);
+}
+
+function stopInfiniteScroll() {
+  if (infiniteObserver) { infiniteObserver.disconnect(); infiniteObserver = null; }
+  if (infiniteSentinel) { infiniteSentinel.remove(); infiniteSentinel = null; }
+}
+function setupInfiniteScroll(currentCount) {
+  stopInfiniteScroll();
+  if (els.results.style.display === "none") return;
+  if (currentCount >= MAX_LIMIT) return;
+
+  infiniteSentinel = document.createElement("div");
+  infiniteSentinel.id = "infiniteSentinel";
+  infiniteSentinel.style.height = "1px";
+  infiniteSentinel.style.width = "100%";
+  infiniteSentinel.style.margin = "12px 0 0";
+  els.results.parentElement.appendChild(infiniteSentinel);
+
+  infiniteObserver = new IntersectionObserver(async (entries) => {
+    if (!entries.some(e => e.isIntersecting)) return;
+    const next = Math.min(loadedLimit + PAGE_SIZE, MAX_LIMIT);
+    if (next === loadedLimit) return;
+
+    loadedLimit = next;
+    if (inflight) return;
+    await loadFeed({ append: true });
+  }, { rootMargin: "900px 0px" });
+
+  infiniteObserver.observe(infiniteSentinel);
+}
+
+/* =======================
+   FEED/SEARCH VIEW
+======================= */
+async function loadFeed({ append = false } = {}) {
+  if (currentView === "match-center") return;
+
+  const q = els.q.value.trim();
+  if (!append) loadedLimit = PAGE_SIZE;
+
+  const isSearch = Boolean(q);
+  if (!append) els.status.textContent = "Loading…";
+
+  let items = [];
+
+  if (!isSearch && currentFeed) {
+    const snap = await loadFeedSnapshot(currentFeed);
+    if (snap?.items?.length) {
+      items = snap.items.slice(0, Math.min(loadedLimit, MAX_LIMIT));
+    }
+  }
+
+  /*
+   * Firestore API: search queries, or feed tabs when snapshot/per-feed file is empty.
+   * (Previously, empty football/celebrity snapshots fell back to unfiltered latest.json —
+   * mostly politics — which was wrong.)
+   */
+  if (!items.length && (isSearch || currentFeed)) {
+    const url = new URL(`${API_BASE}/articles`);
+    if (q) url.searchParams.set("q", q);
+    if (currentFeed) url.searchParams.set("feed", currentFeed);
+    url.searchParams.set("limit", String(Math.min(loadedLimit, MAX_LIMIT)));
+
+    items = await fetchJSONRelaxed(url, []);
+  }
+
+  if (items.length) {
+    setStaleUI(false);
+  } else if (!isSearch && currentFeed) {
+    setStaleUI(
+      !navigator.onLine,
+      navigator.onLine ? `no ${currentFeed} articles in snapshot or API` : "offline"
+    );
+  } else if (isSearch && !navigator.onLine) {
+    setStaleUI(true, "offline");
+  } else {
+    setStaleUI(false);
+  }
+
+  items.sort((a, b) => ingestTimeMs(b) - ingestTimeMs(a));
+
+  const label = FEED_TITLES[currentFeed] || (q ? "Results" : "News");
+
+  els.home.innerHTML = "";
+  els.home.style.display = "none";
+
+  const html = items.map(a => cardHtml(a, { sectionLabel: label })).join("");
+
+  // API/Snapshot returns full list up to limit, so overwrite is ok
+  els.results.innerHTML = html;
+  els.results.style.display = "";
+
+  if (!items.length) {
+    renderEmptyState(els.results, "Nothing to show yet.");
+  }
+
+  hydrateLazyImages(els.results);
+  els.status.textContent = q ? `${items.length} result(s)` : `${items.length} latest`;
+  setupInfiniteScroll(items.length);
+}
+
+/* =======================
+   MATCH CENTER (UNCHANGED from your file)
+   (kept as-is)
+======================= */
+async function showMatchCenterShell() {
+  stopInfiniteScroll();
+
+  els.status.textContent = "Loading Match Center…";
+  els.results.style.display = "none";
+  els.home.style.display = "";
+  els.home.innerHTML = `
+    <div class="mc-wrap">
+      <div class="mc-head">
+        <h2>Match Center</h2>
+        <div class="mc-tools">
+          <span id="mcState">Loading…</span>
+          <button id="mcRefreshBtn" class="mc-tab" type="button">Refresh</button>
+        </div>
+      </div>
+
+      <div class="mc-tabs">
+        <button class="mc-tab active" data-tab="live" type="button">Live</button>
+        <button class="mc-tab" data-tab="predictions" type="button">Predictions</button>
+        <button class="mc-tab" data-tab="analysis" type="button">Analysis</button>
+      </div>
+
+      <div class="mc-grid">
+        <ul id="mcList" class="mc-list"></ul>
+
+        <div id="mcPanel" class="mc-panel">
+          <h3>Select a match</h3>
+          <div class="mc-kv">Pick a fixture on the left to see predictions + analysis tools.</div>
+          <div class="mc-hint">Your picks + notes are saved on this device (localStorage).</div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const mc = { tab: "live", selectedId: null, items: [] };
+  const $ = (sel) => els.home.querySelector(sel);
+
+  const listEl = $("#mcList");
+  const panelEl = $("#mcPanel");
+  const stateEl = $("#mcState");
+  const refreshBtn = $("#mcRefreshBtn");
+
+  if (!listEl || !panelEl || !stateEl || !refreshBtn) {
+    els.status.textContent = "Match Center UI mount failed.";
+    return;
+  }
+
+  const STORE_KEY = "rw_mc_matches_v1";
+  function loadMatches() {
+    try {
+      const raw = localStorage.getItem(STORE_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr : [];
+    } catch { return []; }
+  }
+  function saveMatches(arr) {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(arr || [])); } catch {}
+  }
+  function uid() {
+    return `m_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  }
+  function upsertMatch(patch) {
+    const all = loadMatches();
+    const i = all.findIndex(m => m.id === patch.id);
+    if (i >= 0) all[i] = { ...all[i], ...patch, updatedAt: Date.now() };
+    else all.unshift({ ...patch, id: patch.id || uid(), createdAt: Date.now(), updatedAt: Date.now() });
+    saveMatches(all);
+    return all;
+  }
+  function removeMatch(id) {
+    const all = loadMatches().filter(m => m.id !== id);
+    saveMatches(all);
+    return all;
+  }
+
+  const SCOREBAT_IFRAME = `
+    <div class="broadcast-container" style="margin-top:12px;">
+      <iframe
+        src="https://www.scorebat.com/embed/livescore/?token=MjY4NjcyXzE3Njc5NTI1MzlfNTkxNDI3ZDY0YmQyZTk5MzJkMWQ4YmQ4NzYxZmZkNjJhZTcyMTU5NA=="
+        frameborder="0"
+        allowfullscreen
+        allow="autoplay; fullscreen"
+        loading="lazy"
+        style="width:100%;height:760px;border:0;overflow:hidden;display:block;"
+      ></iframe>
+    </div>
+  `;
+
+  function safeText(s) { return escapeHtml(String(s || "").trim()); }
+  function fmtKickoff(ts) {
+    if (!ts) return "";
+    try {
+      const d = new Date(ts);
+      if (Number.isNaN(d.getTime())) return "";
+      return d.toLocaleString([], { weekday: "short", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+    } catch { return ""; }
+  }
+
+  function renderList() {
+    if (mc.tab === "live") {
+      listEl.innerHTML = `
+        <li class="mc-item">
+          <div class="mc-row">
+            <div class="mc-league">Live Scores</div>
+            <div class="mc-time"></div>
+          </div>
+          <div class="mc-kv">Live fixtures are shown on the right (ScoreBat).</div>
+          <div class="mc-hint">Use Predictions/Analysis to add matches and save notes.</div>
+        </li>
+      `;
+      return;
+    }
+
+    const matches = loadMatches();
+
+    if (!matches.length) {
+      listEl.innerHTML = `
+        <li class="mc-item">
+          <div class="mc-row">
+            <div class="mc-league">No saved matches</div>
+          </div>
+          <div class="mc-kv">Click “Add match” to start saving picks + analysis.</div>
+        </li>
+      `;
+      return;
+    }
+
+    listEl.innerHTML = matches.map(m => {
+      const selected = mc.selectedId === m.id ? `style="background: rgba(255,61,0,.06)"` : "";
+      const pick = (m.pick || "").toUpperCase();
+      const conf = m.confidence ? `${m.confidence}%` : "";
+      const badge = pick ? ` <span class="mc-badge">${safeText(pick)} ${safeText(conf)}</span>` : "";
+      return `
+        <li class="mc-item" data-id="${safeText(m.id)}" ${selected}>
+          <div class="mc-row">
+            <div class="mc-league">${safeText(m.league || "Match")}${badge}</div>
+            <div class="mc-time">${safeText(fmtKickoff(m.kickoff))}</div>
+          </div>
+          <div class="mc-teams">
+            <div>${safeText(m.home)} vs ${safeText(m.away)}</div>
+            <div class="mc-score">${safeText(m.score || "")}</div>
+          </div>
+        </li>
+      `;
+    }).join("");
+  }
+
+  function renderLivePanel() {
+    panelEl.innerHTML = `
+      <h3>Live Scores</h3>
+      <div class="mc-kv">Powered by ScoreBat</div>
+      ${SCOREBAT_IFRAME}
+      <div class="mc-hint">If the embed doesn’t load, check network/adblocker.</div>
+    `;
+  }
+
+  function renderAddMatchForm() {
+    panelEl.innerHTML = `
+      <h3>${mc.tab === "analysis" ? "Analysis" : "Predictions"}</h3>
+      <div class="mc-kv">Add a match manually (saved on this device).</div>
+
+      <div style="margin-top:12px; display:grid; gap:10px;">
+        <div style="display:grid; gap:6px;">
+          <label style="font-weight:700;">League (optional)</label>
+          <input id="mcLeague" class="mc-notes" style="height:42px; padding:10px;" placeholder="e.g. EPL" />
+        </div>
+
+        <div style="display:grid; gap:6px;">
+          <label style="font-weight:700;">Home Team</label>
+          <input id="mcHome" class="mc-notes" style="height:42px; padding:10px;" placeholder="e.g. Arsenal" />
+        </div>
+
+        <div style="display:grid; gap:6px;">
+          <label style="font-weight:700;">Away Team</label>
+          <input id="mcAway" class="mc-notes" style="height:42px; padding:10px;" placeholder="e.g. Chelsea" />
+        </div>
+
+        <div style="display:grid; gap:6px;">
+          <label style="font-weight:700;">Kickoff (optional)</label>
+          <input id="mcKickoff" type="datetime-local" class="mc-notes" style="height:42px; padding:10px;" />
+        </div>
+
+        <div style="display:flex; gap:10px; margin-top:6px;">
+          <button id="mcCreate" class="mc-tab" type="button">Save match</button>
+          <button id="mcCancel" class="mc-tab" type="button">Cancel</button>
+        </div>
+
+        <div class="mc-hint">After saving, click the match on the left to add pick + notes.</div>
+      </div>
+    `;
+
+    const leagueEl = $("#mcLeague");
+    const homeEl = $("#mcHome");
+    const awayEl = $("#mcAway");
+    const kickoffEl = $("#mcKickoff");
+
+    $("#mcCancel").addEventListener("click", () => {
+      mc.selectedId = null;
+      renderList();
+      renderEmptyPanel();
+    });
+
+    $("#mcCreate").addEventListener("click", () => {
+      const league = (leagueEl?.value || "").trim();
+      const home = (homeEl?.value || "").trim();
+      const away = (awayEl?.value || "").trim();
+      const kickoff = kickoffEl?.value ? new Date(kickoffEl.value).getTime() : null;
+
+      if (!home || !away) {
+        stateEl.textContent = "Home & Away team are required.";
+        return;
+      }
+
+      const m = { id: uid(), league, home, away, kickoff, pick: "", confidence: "", notes: "" };
+      upsertMatch(m);
+      mc.selectedId = m.id;
+
+      stateEl.textContent = "Saved.";
+      renderList();
+      renderMatchPanel(m);
+    });
+  }
+
+  function renderEmptyPanel() {
+    panelEl.innerHTML = `
+      <h3>${mc.tab === "analysis" ? "Analysis" : "Predictions"}</h3>
+      <div class="mc-kv">Select a saved match on the left, or add a new one.</div>
+      <div style="margin-top:12px;">
+        <button id="mcAddMatch" class="mc-tab" type="button">Add match</button>
+      </div>
+      <div class="mc-hint">Everything is saved locally (no backend required).</div>
+    `;
+    $("#mcAddMatch").addEventListener("click", () => renderAddMatchForm());
+  }
+
+  function renderMatchPanel(m) {
+    if (!m) return;
+
+    const id = m.id;
+    const savedPick = (m.pick || "").toUpperCase();
+    const savedConf = m.confidence || "";
+    const savedNote = m.notes || "";
+
+    const header = `
+      <h3>${safeText(m.home)} vs ${safeText(m.away)}</h3>
+      <div class="mc-kv">
+        ${safeText(m.league || "Match")}
+        ${m.kickoff ? ` • <b>${safeText(fmtKickoff(m.kickoff))}</b>` : ""}
+      </div>
+    `;
+
+    if (mc.tab === "predictions") {
+      panelEl.innerHTML = `
+        ${header}
+
+        <div style="margin-top:10px; font-weight:900;">Your pick</div>
+        <div class="mc-picks">
+          <button class="mc-pick ${savedPick==="H"?"active":""}" data-pick="H" type="button">Home Win</button>
+          <button class="mc-pick ${savedPick==="D"?"active":""}" data-pick="D" type="button">Draw</button>
+          <button class="mc-pick ${savedPick==="A"?"active":""}" data-pick="A" type="button">Away Win</button>
+        </div>
+
+        <div style="margin-top:12px; font-weight:900;">Confidence (%)</div>
+        <input id="mcConf" class="mc-notes" style="height:42px; padding:10px;" inputmode="numeric" placeholder="e.g. 65" value="${safeText(savedConf)}"/>
+
+        <div style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap;">
+          <button id="mcDelete" class="mc-tab" type="button">Delete match</button>
+        </div>
+
+        <div class="mc-hint">Auto-saved on this device.</div>
+      `;
+
+      panelEl.querySelectorAll(".mc-pick").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const v = (btn.dataset.pick || "").toUpperCase();
+          upsertMatch({ id, pick: v });
+          renderList();
+          const updated = loadMatches().find(x => x.id === id);
+          renderMatchPanel(updated);
+        });
+      });
+
+      const confEl = $("#mcConf");
+      let t = null;
+      if (confEl) {
+        confEl.addEventListener("input", () => {
+          clearTimeout(t);
+          t = setTimeout(() => {
+            let v = (confEl.value || "").replace(/[^\d]/g, "");
+            if (v) v = String(Math.max(0, Math.min(100, Number(v))));
+            confEl.value = v;
+            upsertMatch({ id, confidence: v });
+            renderList();
+          }, 250);
+        });
+      }
+
+      $("#mcDelete").addEventListener("click", () => {
+        removeMatch(id);
+        mc.selectedId = null;
+        renderList();
+        renderEmptyPanel();
+      });
+
+      stateEl.textContent = "Predictions ready.";
+      return;
+    }
+
+    const analysisTemplate =
+      `Quick read:\n` +
+      `• Match: ${m.home} vs ${m.away}\n` +
+      `${m.league ? `• League: ${m.league}\n` : ""}` +
+      `${m.kickoff ? `• Kickoff: ${new Date(m.kickoff).toLocaleString()}\n` : ""}` +
+      `\nNotes to consider:\n` +
+      `• Form / injuries / motivation\n` +
+      `• Home advantage, schedule, weather\n`;
+
+    panelEl.innerHTML = `
+      ${header}
+
+      <div style="margin-top:12px; font-weight:900;">Analysis (editable)</div>
+      <textarea id="mcNotes" class="mc-notes" placeholder="Write your match analysis...">${safeText(savedNote || analysisTemplate)}</textarea>
+
+      <div style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap;">
+        <button id="mcDelete" class="mc-tab" type="button">Delete match</button>
+      </div>
+
+      <div class="mc-hint">Auto-saved on this device.</div>
+    `;
+
+    const notes = $("#mcNotes");
+    if (notes) {
+      let t2 = null;
+      notes.addEventListener("input", () => {
+        clearTimeout(t2);
+        t2 = setTimeout(() => {
+          const v = notes.value || "";
+          upsertMatch({ id, notes: v });
+        }, 250);
+      });
+    }
+
+    $("#mcDelete").addEventListener("click", () => {
+      removeMatch(id);
+      mc.selectedId = null;
+      renderList();
+      renderEmptyPanel();
+    });
+
+    stateEl.textContent = "Analysis ready.";
+  }
+
+  function renderPanelForTab() {
+    if (mc.tab === "live") return renderLivePanel();
+
+    const matches = loadMatches();
+    if (!mc.selectedId) return renderEmptyPanel();
+
+    const m = matches.find(x => x.id === mc.selectedId);
+    if (!m) {
+      mc.selectedId = null;
+      return renderEmptyPanel();
+    }
+    renderMatchPanel(m);
+  }
+
+  async function loadTab() {
+    stateEl.textContent = mc.tab === "live" ? "Live scores: ScoreBat embed" : "Saved matches (localStorage)";
+    renderList();
+    renderPanelForTab();
+  }
+
+  listEl.addEventListener("click", (e) => {
+    const li = e.target.closest(".mc-item[data-id]");
+    if (!li) return;
+    mc.selectedId = li.dataset.id;
+    renderList();
+    renderPanelForTab();
+  });
+
+  els.home.querySelectorAll(".mc-tab[data-tab]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      els.home.querySelectorAll(".mc-tab[data-tab]").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      mc.tab = btn.dataset.tab || "live";
+      if (mc.tab === "live") mc.selectedId = null;
+      await loadTab();
+    });
+  });
+
+  refreshBtn.addEventListener("click", () => loadTab());
+  await loadTab();
+}
+
+/* =======================
+   CONTROLLER
+======================= */
+let inflight = false;
+let lastUpdated = null;
+
+function markUpdated() {
+  lastUpdated = new Date();
+  const rwTime = document.getElementById("rwTime");
+  if (rwTime) rwTime.textContent = lastUpdated.toLocaleTimeString();
+}
+
+async function safeLoad() {
+  if (inflight) return;
+  inflight = true;
+  try {
+    closeAllShareMenus();
+
+    const { srcUrl } = getArticleParams();
+    if (srcUrl) {
+      await showArticleView(srcUrl);
+      markUpdated();
+      return;
+    }
+
+    if (currentView === "match-center") {
+      await showMatchCenterShell();
+    } else {
+      const q = els.q.value.trim();
+      if (!q && !currentFeed) await loadHome();
+      else await loadFeed({ append: false });
+    }
+
+    markUpdated();
+  } finally {
+    inflight = false;
+  }
+}
+
+/* =======================
+   EVENTS
+======================= */
+els.navLinks.forEach(link => {
+  link.addEventListener("click", (e) => {
+    e.preventDefault();
+    clearArticleRoute();
+
+    if (link.dataset.view === "match-center") {
+      currentView = "match-center";
+      currentFeed = "";
+      els.q.value = "";
+    } else {
+      currentView = "home";
+      currentFeed = link.dataset.feed || "";
+      if (!currentFeed) els.q.value = "";
+    }
+
+    els.navLinks.forEach(a => {
+      a.classList.remove("active");
+      a.removeAttribute("aria-current");
+    });
+    link.classList.add("active");
+    link.setAttribute("aria-current", "page");
+
+    stopHomeInfinite();
+    safeLoad();
+  });
+});
+
+els.form?.addEventListener("submit", (e) => {
+  e.preventDefault();
+  clearArticleRoute();
+  currentView = "home";
+  stopHomeInfinite();
+  safeLoad();
+});
+
+// ✅ Track article card clicks (any link to #/article?u=...)
+document.addEventListener("click", (e) => {
+  const link = e.target.closest('a[href^="#/article?u="]');
+  if (!link) return;
+
+  try {
+    const href = link.getAttribute("href") || "";
+    const qs = href.split("?")[1] || "";
+    const u = new URLSearchParams(qs).get("u") || "";
+    const src = u ? decodeURIComponent(u) : "";
+    if (src) rwMetric("click", src);
+  } catch {}
+}, { capture: true });
+
+// Share button handler (supports .share-btn + .rw-share-btn)
+document.addEventListener("click", async (e) => {
+  const btn = e.target.closest(".rw-share-btn, .share-btn");
+  if (!btn) return;
+
+  // if menu is open and user clicks share again, toggle it
+  e.preventDefault();
+
+  // quick native share on mobile if no long-press menu needed:
+  // BUT we keep your menu too — open menu always; inside has "Share…"
+  openShareMenu(btn);
+});
+
+// ✅ Handle browser back/forward + hash changes
+window.addEventListener("popstate", () => safeLoad());
+window.addEventListener("hashchange", () => safeLoad());
+
+/* =======================
+   BOOT + REFRESH
+======================= */
+safeLoad();
+setInterval(() => safeLoad(), POLL_MS);
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") safeLoad();
+});
+window.addEventListener("online", () => safeLoad());
+
+/* ---------- Mobile drawer controls ---------- */
+const menuBtn = document.getElementById("menuBtn");
+const drawer = document.getElementById("mobileDrawer");
+const backdrop = document.getElementById("drawerBackdrop");
+const closeBtn = document.getElementById("drawerClose");
+
+let lastFocusEl = null;
+
+function openDrawer() {
+  if (!drawer || !backdrop || !menuBtn) return;
+  lastFocusEl = document.activeElement;
+
+  backdrop.hidden = false;
+  drawer.classList.add("open");
+  drawer.setAttribute("aria-hidden", "false");
+  menuBtn.setAttribute("aria-expanded", "true");
+  document.body.style.overflow = "hidden";
+
+  const firstLink = drawer.querySelector("a,button,[tabindex]:not([tabindex='-1'])");
+  firstLink?.focus();
+}
+
+function closeDrawer() {
+  if (!drawer || !backdrop || !menuBtn) return;
+
+  drawer.classList.remove("open");
+  drawer.setAttribute("aria-hidden", "true");
+  menuBtn.setAttribute("aria-expanded", "false");
+  backdrop.hidden = true;
+  document.body.style.overflow = "";
+
+  lastFocusEl?.focus?.();
+}
+
+menuBtn?.addEventListener("click", openDrawer);
+closeBtn?.addEventListener("click", closeDrawer);
+backdrop?.addEventListener("click", closeDrawer);
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && drawer?.classList.contains("open")) closeDrawer();
+});
+
+drawer?.addEventListener("click", (e) => {
+  const a = e.target?.closest?.("a.nav-link");
+  if (a) closeDrawer();
+});

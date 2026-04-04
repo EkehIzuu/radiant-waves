@@ -1,0 +1,35 @@
+# Run the news ingestor every 3 hours. Ensure FIREBASE_SERVICE_ACCOUNT_JSON is set in repo secrets.
+
+name: Run ingest
+
+on:
+  schedule:
+    - cron: "0 */3 * * *"   # Every 3 hours at :00
+  workflow_dispatch:
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Write service account JSON and set project
+        env:
+          SA_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          printf '%s\n' "$SA_JSON" > sa.json
+          echo "GOOGLE_CLOUD_PROJECT=$(python3 -c "import json; print(json.load(open('sa.json'))['project_id'])")" >> $GITHUB_ENV
+
+      - name: Install dependencies
+        run: pip install google-cloud-firestore
+
+      - name: Run ingest
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/sa.json
+        run: python scripts/ingest.py

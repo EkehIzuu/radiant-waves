@@ -1,0 +1,12 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{ og_title or 'Radiant Waves' }}</title>
+<link rel="icon" href="/static/radiantwaves-logo.png">
+<meta property="og:title" content="{{ og_title or 'Radiant Waves' }}">
+<meta property="og:description" content="{{ og_desc or 'Fresh Naija vibes, daily.' }}">
+<meta property="og:image" content="{{ og_image or url_for('static', filename='og-default.jpg', _external=True) }}">
+<meta property="og:type" content="article">
+<meta property="og:url" content="{{ og_url or request.url }}">
+<link rel="canonical" href="{{ canonical or og_url or request.url }}">
+<style>body{margin:0;font:15px/1.6 system-ui,-apple-system,Segoe UI,Roboto,Arial} .wrap{max-width:880px;margin:24px auto;padding:0 16px} img{max-width:100%;border-radius:12px} a{text-decoration:none;color:#2b63ff}</style>
+</head><body><div class="wrap">{% block body %}{% endblock %}</div></body></html>
