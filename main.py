@@ -825,17 +825,42 @@ def _serialize_article(d: dict) -> dict:
 
 
 def _query_latest(limit: int, feed: Optional[str] = None) -> List[dict]:
-    q = coll.order_by("ingestedAt", direction=firestore.Query.DESCENDING).limit(limit)
-    if feed:
+    """Newest docs; per-feed uses composite index when available, else global scan + filter."""
+    if not feed:
+        q = coll.order_by("ingestedAt", direction=firestore.Query.DESCENDING).limit(limit)
+        return [doc.to_dict() or {} for doc in q.stream()]
+
+    try:
         if FieldFilter:
-            q = coll.where(filter=FieldFilter("feed", "==", feed)) \
-                    .order_by("ingestedAt", direction=firestore.Query.DESCENDING) \
-                    .limit(limit)
+            q = (
+                coll.where(filter=FieldFilter("feed", "==", feed))
+                .order_by("ingestedAt", direction=firestore.Query.DESCENDING)
+                .limit(limit)
+            )
         else:
-            q = coll.where("feed", "==", feed) \
-                    .order_by("ingestedAt", direction=firestore.Query.DESCENDING) \
-                    .limit(limit)
-    return [doc.to_dict() or {} for doc in q.stream()]
+            q = (
+                coll.where("feed", "==", feed)
+                .order_by("ingestedAt", direction=firestore.Query.DESCENDING)
+                .limit(limit)
+            )
+        return [doc.to_dict() or {} for doc in q.stream()]
+    except Exception as e:
+        log.warning(
+            "Per-feed Firestore query failed (%s), using global scan + filter: %s",
+            feed,
+            e,
+        )
+        wide = min(max(limit * 8, 800), 8000)
+        q = coll.order_by("ingestedAt", direction=firestore.Query.DESCENDING).limit(wide)
+        rows: List[dict] = []
+        f_lower = feed.lower()
+        for doc in q.stream():
+            d = doc.to_dict() or {}
+            if (d.get("feed") or "").lower() == f_lower:
+                rows.append(d)
+            if len(rows) >= limit:
+                break
+        return rows
 
 
 def _gzip_bytes(payload: dict) -> bytes:

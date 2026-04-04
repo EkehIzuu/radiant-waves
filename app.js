@@ -269,8 +269,13 @@ async function fetchJSON(u) {
   return res.json();
 }
 async function fetchJSONRelaxed(u, fallback = []) {
-  try { return await fetchJSON(u); }
-  catch { return Array.isArray(fallback) ? fallback : fallback; }
+  try {
+    return await fetchJSON(u);
+  } catch (e) {
+    const href = u instanceof URL ? u.href : String(u);
+    console.warn("[API] request failed:", href, e?.message || e);
+    return Array.isArray(fallback) ? fallback : fallback;
+  }
 }
 
 /* =======================
