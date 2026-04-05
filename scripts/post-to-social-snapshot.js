@@ -3,6 +3,9 @@ import path from "path";
 import zlib from "zlib";
 import sharp from "sharp";
 
+/** Increment when posting logic changes; Actions logs should show this (if not, fork `main` is behind). */
+const SOCIAL_POST_SCRIPT_REV = 3;
+
 const SNAPSHOT_LOCAL = path.join(process.cwd(), "snapshots", "latest.json.gz");
 const STATE_PATH = path.join(process.cwd(), "social_state.json");
 
@@ -1056,6 +1059,12 @@ async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
 }
 
 async function main() {
+  console.log(
+    "[social] script rev=%s (want ≥3 on fork) | repo=%s | sha=%s",
+    SOCIAL_POST_SCRIPT_REV,
+    env("GITHUB_REPOSITORY") || "(local)",
+    env("GITHUB_SHA") ? env("GITHUB_SHA").slice(0, 7) : "(local)"
+  );
   const targetFeed = resolveTargetFeed();
   let items = await loadSnapshotItems();
   items = filterItemsByFeed(items, targetFeed);
