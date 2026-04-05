@@ -335,6 +335,7 @@ async function shortenUrl(longUrl) {
 
 /** Newest-first; skips URLs already in social_state posted_urls (and in-page hash duplicates). */
 function pickLatestUnposted(items, state) {
+  const requireImg = /^1|true|yes$/i.test(env("SOCIAL_REQUIRE_ARTICLE_IMAGE"));
   const postedSet = getPostedUrlSet(state);
   const skippedSet = getSkippedUrlSet(state);
   const sorted = [...items].sort((a, b) => parseTs(b.ingestedAt || b.publishedAt) - parseTs(a.ingestedAt || a.publishedAt));
@@ -342,8 +343,8 @@ function pickLatestUnposted(items, state) {
     const url = normalizeUrlForDedupe(it.url || it.link || "");
     const imageUrl = normalizeUrl(it.imageUrl || it.image || "");
     if (!url) continue;
-    if (!imageUrl) continue;
-    if (isLowQualityImageUrl(imageUrl)) continue;
+    if (requireImg && !imageUrl) continue;
+    if (imageUrl && isLowQualityImageUrl(imageUrl)) continue;
     if (postedSet.has(url)) continue;
     const siteArticleView = normalizeUrlForDedupe(buildSiteArticleViewUrl(url));
     if (siteArticleView && postedSet.has(siteArticleView)) continue;
@@ -352,10 +353,35 @@ function pickLatestUnposted(items, state) {
       id: it.id || "",
       title: stripHtml(it.title || "Radiant Waves"),
       url,
-      imageUrl,
+      imageUrl: imageUrl || "",
     };
   }
   return null;
+}
+
+function logNoCandidatesDiagnostics(items, state) {
+  const postedSet = getPostedUrlSet(state);
+  let withUrl = 0;
+  let withImageField = 0;
+  let blockedByPosted = 0;
+  for (const it of items) {
+    const url = normalizeUrlForDedupe(it.url || it.link || "");
+    if (!url) continue;
+    withUrl++;
+    if (String(it.imageUrl || it.image || "").trim()) withImageField++;
+    if (postedSet.has(url)) {
+      blockedByPosted++;
+      continue;
+    }
+    const siteArticleView = normalizeUrlForDedupe(buildSiteArticleViewUrl(url));
+    if (siteArticleView && postedSet.has(siteArticleView)) blockedByPosted++;
+  }
+  console.error(
+    "[social] Diagnostics (feed pool): articles with url=%d, with image field=%d, blocked by posted_urls≈%d",
+    withUrl,
+    withImageField,
+    blockedByPosted
+  );
 }
 
 async function generateCard(title, articleImageUrl, imageBufferPreloaded = null) {
@@ -1060,18 +1086,25 @@ async function main() {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const art = pickLatestUnposted(items, state);
     if (!art) {
+      logNoCandidatesDiagnostics(items, state);
       console.error(
-        "[social] FAILED: no unposted candidates for feed=%s (all posted, or none have imageUrl / pass URL filters).",
-        targetFeed
+        "[social] FAILED: no unposted candidates for feed=%s (all posted, or none pass URL filters%s).",
+        targetFeed,
+        /^1|true|yes$/i.test(env("SOCIAL_REQUIRE_ARTICLE_IMAGE")) ? " / require image" : ""
       );
       process.exit(1);
     }
 
-    const buf = await fetchValidatedImageBuffer(art.imageUrl);
-    if (!buf) {
+    const buf = String(art.imageUrl || "").trim()
+      ? await fetchValidatedImageBuffer(art.imageUrl)
+      : null;
+    if (String(art.imageUrl || "").trim() && !buf) {
       console.warn("[social] Image quality check failed, trying next article… (%s)", art.url.slice(0, 80));
       prependSkippedUrl(state, art.url);
       continue;
+    }
+    if (!String(art.imageUrl || "").trim()) {
+      console.warn("[social] No snapshot image — posting postcard with placeholder art (%s)", art.url.slice(0, 80));
     }
 
     try {
