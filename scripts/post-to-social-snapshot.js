@@ -130,18 +130,18 @@ function isLowQualityImageUrl(url) {
 }
 
 /**
- * High-quality hero images only (large file + OG-style dimensions). Wrong Content-Type is OK if sharp decodes.
- * Relax only via env in emergencies: SOCIAL_MIN_IMAGE_BYTES, SOCIAL_MIN_IMAGE_W, SOCIAL_MIN_IMAGE_H,
- * SOCIAL_MIN_PIXELS, SOCIAL_IMAGE_AR_MIN, SOCIAL_IMAGE_AR_MAX
+ * Hero images: skip tiny thumbs and extreme aspect ratios. Wrong Content-Type is OK if sharp decodes.
+ * Defaults are a bit looser than OG-1200×630 so more feed images pass; tighten via env if needed.
+ * SOCIAL_MIN_IMAGE_BYTES, SOCIAL_MIN_IMAGE_W, SOCIAL_MIN_IMAGE_H, SOCIAL_MIN_PIXELS, SOCIAL_IMAGE_AR_MIN/MAX
  */
 async function fetchValidatedImageBuffer(imageUrl) {
   if (!imageUrl || isLowQualityImageUrl(imageUrl)) return null;
-  const minBytes = Math.max(8000, Number(env("SOCIAL_MIN_IMAGE_BYTES", "15000")) || 15000);
-  const minW = Math.max(400, Number(env("SOCIAL_MIN_IMAGE_W", "600")) || 600);
-  const minH = Math.max(200, Number(env("SOCIAL_MIN_IMAGE_H", "315")) || 315);
-  const minPixels = Math.max(50_000, Number(env("SOCIAL_MIN_PIXELS", "189000")) || 189000);
-  const arMin = Number(env("SOCIAL_IMAGE_AR_MIN", "0.6")) || 0.6;
-  const arMax = Number(env("SOCIAL_IMAGE_AR_MAX", "2.5")) || 2.5;
+  const minBytes = Math.max(6000, Number(env("SOCIAL_MIN_IMAGE_BYTES", "10000")) || 10000);
+  const minW = Math.max(320, Number(env("SOCIAL_MIN_IMAGE_W", "480")) || 480);
+  const minH = Math.max(180, Number(env("SOCIAL_MIN_IMAGE_H", "250")) || 250);
+  const minPixels = Math.max(40_000, Number(env("SOCIAL_MIN_PIXELS", "120000")) || 120000);
+  const arMin = Number(env("SOCIAL_IMAGE_AR_MIN", "0.5")) || 0.5;
+  const arMax = Number(env("SOCIAL_IMAGE_AR_MAX", "3")) || 3;
   try {
     const res = await fetch(imageUrl, {
       signal: AbortSignal.timeout(20000),
