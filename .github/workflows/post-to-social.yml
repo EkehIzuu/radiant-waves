@@ -1,5 +1,5 @@
-# Post latest ingest article from snapshots/latest.json.gz (same source as site home snapshot).
-# Fetches fresh JSON from raw.githubusercontent.com on each run (not the possibly stale checkout).
+# Posts one feed per run from snapshot (Telegram + optional Meta). Green only when Telegram succeeds.
+# UTC rotation each hour: hour%3===0 → politics, ===1 → football, ===2 → celebrity (one post per hour).
 name: Post to social (snapshot)
 
 # One run at a time so social_state.json push/rebase races don't drop posted_urls.
@@ -9,10 +9,19 @@ concurrency:
 
 on:
   schedule:
-    # Every 3 hours 30 minutes (UTC)
-    - cron: "0 */7 * * *"
-    - cron: "30 3-23/7 * * *"
-  workflow_dispatch: # Allow manual run from Actions tab
+    # Every hour at :00 UTC — feed chosen by scripts/post-to-social-snapshot.js (hour % 3)
+    - cron: "0 * * * *"
+  workflow_dispatch:
+    inputs:
+      feed:
+        description: "Which feed to post (auto = same as schedule, from UTC hour)"
+        type: choice
+        options:
+          - auto
+          - politics
+          - football
+          - celebrity
+        default: auto
 
 jobs:
   post:
@@ -35,6 +44,8 @@ jobs:
 
       - name: Post from snapshot
         env:
+          # Manual run only; scheduled runs leave empty → script uses UTC hour %% 3
+          SOCIAL_TARGET_FEED: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.feed || '' }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}

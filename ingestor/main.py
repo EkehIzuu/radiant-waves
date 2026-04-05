@@ -15,6 +15,7 @@ import feedparser
 import requests
 from google.cloud import firestore
 from google.oauth2 import service_account
+from google.api_core.exceptions import ResourceExhausted
 
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _ROOT not in sys.path:
@@ -685,28 +686,53 @@ def find_image_in_entry(entry, feed_name: str):
 
     return None
 
+
+class FirestoreQuotaExceeded(Exception):
+    """Firestore 429 / quota — stop ingest loop without a noisy traceback per item."""
+
+
+def _is_firestore_quota_error(exc):
+    e = exc
+    seen = set()
+    while e is not None and id(e) not in seen:
+        seen.add(id(e))
+        if isinstance(e, ResourceExhausted):
+            return True
+        msg = str(e).lower()
+        if "quota exceeded" in msg or "resource exhausted" in msg:
+            return True
+        e = getattr(e, "__cause__", None)
+    return False
+
+
 def upsert_article(doc):
     url = doc.get("url")
     if not url:
         return False
 
-    if FieldFilter:
-        existing = list(coll.where(filter=FieldFilter("url", "==", url)).limit(1).stream())
-    else:
-        existing = list(coll.where("url", "==", url).limit(1).stream())
-
-    if existing:
-        existing_doc = existing[0].to_dict() or {}
-        if "ingestedAt" in existing_doc:
-            doc["ingestedAt"] = existing_doc["ingestedAt"]
+    try:
+        if FieldFilter:
+            existing = list(coll.where(filter=FieldFilter("url", "==", url)).limit(1).stream())
         else:
-            doc["ingestedAt"] = dt_utc_now()
-        coll.document(existing[0].id).set(doc, merge=True)
-        return True
-    else:
+            existing = list(coll.where("url", "==", url).limit(1).stream())
+
+        if existing:
+            existing_doc = existing[0].to_dict() or {}
+            if "ingestedAt" in existing_doc:
+                doc["ingestedAt"] = existing_doc["ingestedAt"]
+            else:
+                doc["ingestedAt"] = dt_utc_now()
+            coll.document(existing[0].id).set(doc, merge=True)
+            return True
         doc["ingestedAt"] = dt_utc_now()
         coll.add(doc)
         return True
+    except Exception as e:
+        if _is_firestore_quota_error(e):
+            log.warning("Firestore quota exceeded during upsert (url=%s…)", (url or "")[:100])
+            raise FirestoreQuotaExceeded from e
+        log.exception("Firestore upsert failed: %s", e)
+        return False
 
 
 # =========================
@@ -832,46 +858,67 @@ def build_and_upload_snapshots():
 def ingest():
     logging.info("Starting ingestion run")
     written = skipped = 0
+    quota_hit = False
 
-    for feed_name, urls in FEEDS.items():
-        urls = urls if isinstance(urls, (list, tuple)) else [urls]
-        for feed_url in urls:
-            logging.info(f"Fetching feed: {feed_url} ({feed_name})")
-            parsed = feedparser.parse(feed_url)
+    try:
+        for feed_name, urls in FEEDS.items():
+            if quota_hit:
+                break
+            urls = urls if isinstance(urls, (list, tuple)) else [urls]
+            for feed_url in urls:
+                if quota_hit:
+                    break
+                logging.info(f"Fetching feed: {feed_url} ({feed_name})")
+                parsed = feedparser.parse(feed_url)
 
-            for e in parsed.entries:
-                title = first_non_empty(e.get("title"))
-                orig_link = first_non_empty(e.get("link"))
-                link = resolve_real_link(e, unwrap_google_redirect(orig_link))
-                summary = first_non_empty(e.get("summary"))
-                source = first_non_empty(parsed.feed.get("title"))
+                for e in parsed.entries:
+                    title = first_non_empty(e.get("title"))
+                    orig_link = first_non_empty(e.get("link"))
+                    link = resolve_real_link(e, unwrap_google_redirect(orig_link))
+                    summary = first_non_empty(e.get("summary"))
+                    source = first_non_empty(parsed.feed.get("title"))
 
-                if not link or not title:
-                    skipped += 1
-                    continue
+                    if not link or not title:
+                        skipped += 1
+                        continue
 
-                e2 = dict(e)
-                e2["link"] = link
+                    e2 = dict(e)
+                    e2["link"] = link
 
-                image_url = find_image_in_entry(e2, feed_name)
+                    image_url = find_image_in_entry(e2, feed_name)
 
-                doc = {
-                    "feed": feed_name,
-                    "source": source,
-                    "title": title,
-                    "title_lower": (title or "").lower(),
-                    "summary": summary,
-                    "url": link,
-                    "publishedAt": parse_published(e),
-                    "imageUrl": image_url or "",
-                }
+                    doc = {
+                        "feed": feed_name,
+                        "source": source,
+                        "title": title,
+                        "title_lower": (title or "").lower(),
+                        "summary": summary,
+                        "url": link,
+                        "publishedAt": parse_published(e),
+                        "imageUrl": image_url or "",
+                    }
 
-                if upsert_article(doc):
-                    written += 1
-                else:
-                    skipped += 1
+                    try:
+                        if upsert_article(doc):
+                            written += 1
+                        else:
+                            skipped += 1
+                    except FirestoreQuotaExceeded:
+                        quota_hit = True
+                        break
+                if quota_hit:
+                    break
+            if quota_hit:
+                break
+    except FirestoreQuotaExceeded:
+        quota_hit = True
 
-    logging.info(f"Ingestion done. written={written} skipped={skipped}")
+    if quota_hit:
+        logging.warning(
+            "Ingest stopped early: Firestore daily quota exceeded (429). "
+            "Raise limits in Google Cloud Console or wait for reset; snapshots will still be attempted."
+        )
+    logging.info(f"Ingestion done. written={written} skipped={skipped} quota_stopped={quota_hit}")
 
     # NEW: snapshots after ingestion
     try:

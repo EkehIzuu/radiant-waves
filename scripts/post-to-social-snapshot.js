@@ -37,6 +37,26 @@ function resolveFeedBaseUrl() {
 
 const SNAPSHOT_FEED_NAMES = ["politics", "football", "celebrity"];
 
+/** Hourly UTC: 0→politics, 1→football, 2→celebrity, then repeat. Override with SOCIAL_TARGET_FEED or workflow_dispatch. */
+function resolveTargetFeed() {
+  const explicit = env("SOCIAL_TARGET_FEED").toLowerCase();
+  if (explicit && explicit !== "auto" && SNAPSHOT_FEED_NAMES.includes(explicit)) return explicit;
+  const h = new Date().getUTCHours();
+  return SNAPSHOT_FEED_NAMES[h % 3];
+}
+
+function filterItemsByFeed(items, feed) {
+  const f = String(feed || "").toLowerCase();
+  return (items || []).filter((it) => String(it?.feed || "").toLowerCase() === f);
+}
+
+function prependSkippedUrl(state, url) {
+  const k = normalizeUrlForDedupe(url);
+  if (!k) return;
+  const prev = Array.isArray(state?.skipped_urls) ? state.skipped_urls : [];
+  state.skipped_urls = [k, ...prev.filter((u) => normalizeUrlForDedupe(u) !== k)].slice(0, 5000);
+}
+
 function parseSnapshotGzBuffer(gz) {
   const raw = zlib.gunzipSync(gz).toString("utf8");
   const data = JSON.parse(raw);
@@ -109,25 +129,42 @@ function isLowQualityImageUrl(url) {
   );
 }
 
+/**
+ * High-quality hero images only (large file + OG-style dimensions). Wrong Content-Type is OK if sharp decodes.
+ * Relax only via env in emergencies: SOCIAL_MIN_IMAGE_BYTES, SOCIAL_MIN_IMAGE_W, SOCIAL_MIN_IMAGE_H,
+ * SOCIAL_MIN_PIXELS, SOCIAL_IMAGE_AR_MIN, SOCIAL_IMAGE_AR_MAX
+ */
 async function fetchValidatedImageBuffer(imageUrl) {
   if (!imageUrl || isLowQualityImageUrl(imageUrl)) return null;
+  const minBytes = Math.max(8000, Number(env("SOCIAL_MIN_IMAGE_BYTES", "15000")) || 15000);
+  const minW = Math.max(400, Number(env("SOCIAL_MIN_IMAGE_W", "600")) || 600);
+  const minH = Math.max(200, Number(env("SOCIAL_MIN_IMAGE_H", "315")) || 315);
+  const minPixels = Math.max(50_000, Number(env("SOCIAL_MIN_PIXELS", "189000")) || 189000);
+  const arMin = Number(env("SOCIAL_IMAGE_AR_MIN", "0.6")) || 0.6;
+  const arMax = Number(env("SOCIAL_IMAGE_AR_MAX", "2.5")) || 2.5;
   try {
     const res = await fetch(imageUrl, {
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(20000),
       headers: { "User-Agent": "RadiantWaves/1.0 (Social Bot)" },
       redirect: "follow",
     });
     if (!res.ok) return null;
-    const ct = String(res.headers.get("content-type") || "").toLowerCase();
-    if (!ct.startsWith("image/")) return null;
     const buf = Buffer.from(await res.arrayBuffer());
-    if (!buf?.length || buf.length < 15000) return null;
-    const meta = await sharp(buf).metadata();
+    if (!buf?.length || buf.length < minBytes) return null;
+    let meta;
+    try {
+      meta = await sharp(buf).metadata();
+    } catch {
+      return null;
+    }
+    const fmt = String(meta.format || "").toLowerCase();
+    if (fmt === "svg" || fmt === "gif") return null;
     const w = Number(meta.width || 0);
     const h = Number(meta.height || 0);
-    if (w < 600 || h < 315) return null;
+    if (w < minW || h < minH) return null;
+    if (w * h < minPixels) return null;
     const ar = w / Math.max(1, h);
-    if (ar < 0.6 || ar > 2.5) return null;
+    if (ar < arMin || ar > arMax) return null;
     return buf;
   } catch {
     return null;
@@ -296,6 +333,7 @@ async function shortenUrl(longUrl) {
   }
 }
 
+/** Newest-first; skips URLs already in social_state posted_urls (and in-page hash duplicates). */
 function pickLatestUnposted(items, state) {
   const postedSet = getPostedUrlSet(state);
   const skippedSet = getSkippedUrlSet(state);
@@ -801,44 +839,12 @@ async function postFacebookStoryFromPublicUrl(imageUrl) {
   return storyData;
 }
 
-async function main() {
-  const items = await loadSnapshotItems();
-  if (!items.length) {
-    console.log("No items in snapshot.");
-    return;
-  }
-
-  const state = readState();
-  console.log(
-    "[social] newest-ingest pick: %d snapshot items | %d posted URLs (normalized), %d skipped",
-    items.length,
-    getPostedUrlSet(state).size,
-    getSkippedUrlSet(state).size
-  );
-  let art = pickLatestUnposted(items, state);
-  let imageBufferValidated = null;
-  let imageAttempts = 0;
-  const maxImageAttempts = 60;
-  while (art && imageAttempts < maxImageAttempts) {
-    imageAttempts += 1;
-    imageBufferValidated = await fetchValidatedImageBuffer(art.imageUrl);
-    if (imageBufferValidated) break;
-    const skipKey = normalizeUrlForDedupe(art.url);
-    state.skipped_urls = [
-      skipKey,
-      ...(Array.isArray(state?.skipped_urls) ? state.skipped_urls : []).filter((u) => normalizeUrlForDedupe(u) !== skipKey),
-    ].slice(0, 5000);
-    art = pickLatestUnposted(items, state);
-  }
-  if (imageAttempts >= maxImageAttempts && !imageBufferValidated) {
-    console.warn("[social] Stopped after %d image validation attempts (avoid infinite loop).", maxImageAttempts);
-  }
-  if (!art) {
-    console.log("No new snapshot article with a quality image to post.");
-    return;
-  }
-
-  console.log("Posting from snapshot:", art.title.slice(0, 80));
+/**
+ * Telegram + Facebook Page feed must succeed when POST_TO_FACEBOOK is on (default).
+ * IG / Stories: best-effort (logged). Writes social_state.json only after TG + FB pass.
+ */
+async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
+  console.log("[social] posting feed=%s — %s", targetFeed, art.title.slice(0, 80));
   console.log("[social] POST_TO_* env (empty = default on):", {
     POST_TO_FACEBOOK: env("POST_TO_FACEBOOK") || "(unset)",
     POST_TO_FACEBOOK_STORY: env("POST_TO_FACEBOOK_STORY") || "(unset)",
@@ -865,28 +871,52 @@ async function main() {
     await logFacebookTokenIdentity(fbToken);
   }
 
-  // Facebook feed: photo = postcard. Link-only feed scrapes your site og:image → logo.
-  if (envSocialEnabled("POST_TO_FACEBOOK") && fbToken) {
+  const wantFbFeed = envSocialEnabled("POST_TO_FACEBOOK");
+  if (wantFbFeed && !fbToken) {
+    throw new Error("POST_TO_FACEBOOK is enabled but FB_PAGE_ACCESS_TOKEN (or Page token) is missing");
+  }
+
+  // Facebook feed: photo = postcard; fallbacks until one returns an id (required when wantFbFeed).
+  let fbFeedOk = false;
+  if (wantFbFeed && fbToken) {
     console.log("[social] Facebook Page feed (postcard photo)…");
     try {
       const fb = await postToFacebook(art.title, postLink, card);
-      if (fb?.id) console.log("Posted to Facebook (photo / postcard). Post id:", fb.id);
+      if (fb?.id) {
+        console.log("Posted to Facebook (photo / postcard). Post id:", fb.id);
+        fbFeedOk = true;
+      }
     } catch (e) {
       console.error("Facebook photo error:", e?.message || e);
+    }
+    if (!fbFeedOk) {
       try {
         const fb2 = await postFacebookFeedTextOnly(art.title, postLink);
-        if (fb2?.id) console.log("Posted to Facebook (text + URL, no link preview). Post id:", fb2.id);
+        if (fb2?.id) {
+          console.log("Posted to Facebook (text + URL, no link preview). Post id:", fb2.id);
+          fbFeedOk = true;
+        }
       } catch (e2) {
         console.error("Facebook text fallback error:", e2?.message || e2);
-        if (env("POST_TO_FACEBOOK_LINK_PREVIEW") === "1") {
-          try {
-            const fb3 = await postFacebookFeedLink(art.title, postLink);
-            if (fb3?.id) console.log("Posted to Facebook (link preview — may show site logo). Post id:", fb3.id);
-          } catch (e3) {
-            console.error("Facebook link-preview error:", e3?.message || e3);
-          }
-        }
       }
+    }
+    if (!fbFeedOk && env("POST_TO_FACEBOOK_LINK_PREVIEW") === "1") {
+      try {
+        const fb3 = await postFacebookFeedLink(art.title, postLink);
+        if (fb3?.id) {
+          console.log("Posted to Facebook (link preview — may show site logo). Post id:", fb3.id);
+          fbFeedOk = true;
+        }
+      } catch (e3) {
+        console.error("Facebook link-preview error:", e3?.message || e3);
+      }
+    }
+    if (!fbFeedOk) {
+      throw new Error(
+        "Facebook Page feed post failed (photo + text fallbacks" +
+          (env("POST_TO_FACEBOOK_LINK_PREVIEW") === "1" ? " + link preview" : "") +
+          "). Enable POST_TO_FACEBOOK_LINK_PREVIEW=1 for a last-resort /feed post, or fix Page token permissions."
+      );
     }
   }
 
@@ -991,11 +1021,68 @@ async function main() {
     ...state,
     last_posted_url: postedKey,
     last_posted_title: art.title,
+    last_posted_feed: targetFeed,
     posted_urls: mergedPosted,
     skipped_urls: (Array.isArray(state?.skipped_urls) ? state.skipped_urls : []).slice(0, 5000),
     updated_at: new Date().toISOString(),
   });
   console.log("Updated social_state.json");
+}
+
+async function main() {
+  const targetFeed = resolveTargetFeed();
+  let items = await loadSnapshotItems();
+  items = filterItemsByFeed(items, targetFeed);
+
+  if (!items.length) {
+    console.error(
+      "[social] FAILED: no snapshot items for feed=%s (check ingest + snapshots/feeds/%s.json.gz).",
+      targetFeed,
+      targetFeed
+    );
+    process.exit(1);
+  }
+
+  const state = readState();
+  console.log(
+    "[social] feed=%s | pool=%d items | %d posted URLs | %d skipped | UTC hour=%d (rotation: politics=h%%3===0, football=1, celebrity=2)",
+    targetFeed,
+    items.length,
+    getPostedUrlSet(state).size,
+    getSkippedUrlSet(state).size,
+    new Date().getUTCHours()
+  );
+
+  const maxAttempts = 200;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const art = pickLatestUnposted(items, state);
+    if (!art) {
+      console.error(
+        "[social] FAILED: no unposted candidates left for feed=%s (or all skipped this run).",
+        targetFeed
+      );
+      process.exit(1);
+    }
+
+    const buf = await fetchValidatedImageBuffer(art.imageUrl);
+    if (!buf) {
+      console.warn("[social] Image quality check failed, trying next article… (%s)", art.url.slice(0, 80));
+      prependSkippedUrl(state, art.url);
+      continue;
+    }
+
+    try {
+      await performSocialPost(art, buf, state, targetFeed);
+      console.log("[social] SUCCESS: posted at least to Telegram (feed=%s).", targetFeed);
+      process.exit(0);
+    } catch (e) {
+      console.error("[social] Post failed, trying next article:", e?.message || e);
+      prependSkippedUrl(state, art.url);
+    }
+  }
+
+  console.error("[social] FAILED: exhausted %d attempts without a successful post.", maxAttempts);
+  process.exit(1);
 }
 
 main().catch((err) => {
