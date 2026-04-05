@@ -4,7 +4,7 @@ import zlib from "zlib";
 import sharp from "sharp";
 
 /** Increment when posting logic changes; Actions logs should show this (if not, fork `main` is behind). */
-const SOCIAL_POST_SCRIPT_REV = 14;
+const SOCIAL_POST_SCRIPT_REV = 15;
 
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
@@ -838,6 +838,15 @@ function formatMetaApiError(err) {
   }
 }
 
+/** Meta often returns OAuth code 2 + is_transient on POST /{ig-user}/media — retry with backoff. */
+function isTransientIgApiError(err) {
+  if (!err || typeof err !== "object") return false;
+  if (err.is_transient === true) return true;
+  if (Number(err.code) === 2) return true;
+  const m = String(err.message || "").toLowerCase();
+  return m.includes("unexpected error") || m.includes("retry your request") || m.includes("please retry");
+}
+
 /** Log why IG may be skipped + probe Page ↔ IG link (SOCIAL_DEBUG_IG=1). */
 async function logInstagramTroubleshoot(imageUrlForIg, fbToken) {
   const wantIg = envSocialEnabled("POST_TO_INSTAGRAM");
@@ -926,11 +935,26 @@ async function postInstagram(caption, imageUrl) {
     caption: caption.slice(0, 2200),
     access_token: token,
   });
-  const createRes = await fetch(`${graph}/${igUserId}/media`, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: createParams });
-  const createData = await createRes.json();
-  if (createData.error) {
-    console.error("[IG] POST /media failed:", formatMetaApiError(createData.error));
+  let createData = null;
+  const createUrl = `${graph}/${igUserId}/media`;
+  const createInit = { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: createParams };
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    const createRes = await fetch(createUrl, createInit);
+    createData = await createRes.json();
+    if (!createData.error) break;
     const er = createData.error;
+    if (isTransientIgApiError(er) && attempt < 5) {
+      const delayMs = Math.min(45_000, 2500 * 2 ** (attempt - 1));
+      console.warn(
+        "[IG] POST /media transient (attempt %s/5): %s — retry in %ss",
+        attempt,
+        er.message || "unknown",
+        (delayMs / 1000).toFixed(1)
+      );
+      await sleep(delayMs);
+      continue;
+    }
+    console.error("[IG] POST /media failed:", formatMetaApiError(er));
     throw new Error(
       er.message || "Instagram media create failed" + (er.code != null ? ` [${er.code}]` : "") + (er.error_subcode != null ? ` sub=${er.error_subcode}` : "")
     );
@@ -950,16 +974,17 @@ async function postInstagram(caption, imageUrl) {
     const pubData = await pubRes.json();
     if (!pubData.error) return pubData;
 
-    const msg = pubData.error?.message || "Instagram publish failed";
-    if (!msg.includes("Media ID is not available") && !msg.includes("not ready")) {
-      console.error("[IG] POST /media_publish failed:", formatMetaApiError(pubData.error));
+    const er = pubData.error;
+    const msg = er?.message || "Instagram publish failed";
+    if (!msg.includes("Media ID is not available") && !msg.includes("not ready") && !isTransientIgApiError(er)) {
+      console.error("[IG] POST /media_publish failed:", formatMetaApiError(er));
     }
-    const retryable = msg.includes("Media ID is not available") || msg.includes("not ready");
+    const retryable =
+      msg.includes("Media ID is not available") || msg.includes("not ready") || isTransientIgApiError(er);
     if (!retryable || attempt === 4) {
-      const er = pubData.error;
       throw new Error(msg + (er?.code != null ? ` [${er.code}]` : ""));
     }
-    await new Promise((resolve) => setTimeout(resolve, 4000 * attempt));
+    await sleep(Math.max(4000 * attempt, isTransientIgApiError(er) ? 5000 : 0));
   }
   throw new Error("Instagram publish failed");
 }
@@ -1033,18 +1058,26 @@ async function postInstagramStory(imageUrl) {
     media_type: "STORIES",
     access_token: token,
   });
-  const createRes = await fetch(`${GRAPH}/${igUserId}/media`, {
+  const storyCreateUrl = `${GRAPH}/${igUserId}/media`;
+  const storyCreateInit = {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: createParams,
-  });
-  const createData = await createRes.json();
-  if (createData.error) {
-    console.error("[IG Story] POST /media failed:", formatMetaApiError(createData.error));
+  };
+  let createData = null;
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    const createRes = await fetch(storyCreateUrl, storyCreateInit);
+    createData = await createRes.json();
+    if (!createData.error) break;
     const err = createData.error;
-    throw new Error(
-      err.message || "Instagram story media create failed" + (err.code ? ` (code ${err.code})` : "")
-    );
+    if (isTransientIgApiError(err) && attempt < 5) {
+      const delayMs = Math.min(45_000, 2500 * 2 ** (attempt - 1));
+      console.warn("[IG Story] POST /media transient (attempt %s/5) — retry in %ss", attempt, (delayMs / 1000).toFixed(1));
+      await sleep(delayMs);
+      continue;
+    }
+    console.error("[IG Story] POST /media failed:", formatMetaApiError(err));
+    throw new Error(err.message || "Instagram story media create failed" + (err.code ? ` (code ${err.code})` : ""));
   }
 
   const creationId = createData.id;
@@ -1060,10 +1093,12 @@ async function postInstagramStory(imageUrl) {
     const pubData = await pubRes.json();
     if (!pubData.error) return pubData;
 
-    const msg = pubData.error?.message || "Instagram story publish failed";
-    const retryable = msg.includes("Media ID is not available") || msg.includes("not ready");
+    const er = pubData.error;
+    const msg = er?.message || "Instagram story publish failed";
+    const retryable =
+      msg.includes("Media ID is not available") || msg.includes("not ready") || isTransientIgApiError(er);
     if (!retryable || attempt === 4) throw new Error(msg);
-    await sleep(4000 * attempt);
+    await sleep(Math.max(4000 * attempt, isTransientIgApiError(er) ? 5000 : 0));
   }
   throw new Error("Instagram story publish failed");
 }
