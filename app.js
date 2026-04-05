@@ -464,7 +464,7 @@ function shareUrls({ url, title }) {
   return {
     whatsapp: `https://wa.me/?text=${t}%20${u}`,
     facebook: `https://www.facebook.com/sharer/sharer.php?u=${u}`,
-    instagram: `https://www.instagram.com/`,
+    instagram: `https://www.instagram.com/radiant_waves.ng/`,
     tiktok: `https://www.tiktok.com/`,
   };
 }

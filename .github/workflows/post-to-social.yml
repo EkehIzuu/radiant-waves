@@ -58,13 +58,17 @@ jobs:
           SNAPSHOT_REF: ${{ vars.SNAPSHOT_REF }}
           SITE_URL: ${{ vars.SITE_URL }}
           SHORTEN_LINK: ${{ vars.SHORTEN_LINK }}
+          # Set to 1 to use Radiant reader URL in captions instead of the source article URL.
+          SOCIAL_USE_SITE_ARTICLE_LINK: ${{ vars.SOCIAL_USE_SITE_ARTICLE_LINK }}
           # Default 1 when variable unset (repo root / Actions). Set var to 0 to disable.
           # Optional: POST_TO_FACEBOOK_LINK_PREVIEW=1 enables link-preview fallback (may show site logo).
           POST_TO_FACEBOOK_LINK_PREVIEW: ${{ vars.POST_TO_FACEBOOK_LINK_PREVIEW }}
           POST_TO_FACEBOOK: ${{ vars.POST_TO_FACEBOOK || '1' }}
+          POST_TO_INSTAGRAM: ${{ vars.POST_TO_INSTAGRAM || '1' }}
           POST_TO_IG_STORY: ${{ vars.POST_TO_IG_STORY || '1' }}
           POST_TO_FACEBOOK_STORY: ${{ vars.POST_TO_FACEBOOK_STORY || '1' }}
           BITLY_ACCESS_TOKEN: ${{ secrets.BITLY_ACCESS_TOKEN }}
+          # Strongly recommended for Instagram feed + story (public HTTPS image URL).
           IMGBB_API_KEY: ${{ secrets.IMGBB_API_KEY }}
         run: node scripts/post-to-social-snapshot.js
 

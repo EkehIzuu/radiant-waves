@@ -4,7 +4,7 @@ import zlib from "zlib";
 import sharp from "sharp";
 
 /** Increment when posting logic changes; Actions logs should show this (if not, fork `main` is behind). */
-const SOCIAL_POST_SCRIPT_REV = 6;
+const SOCIAL_POST_SCRIPT_REV = 7;
 
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
@@ -1012,22 +1012,45 @@ async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
   console.log("[social] POST_TO_* env (empty = default on):", {
     POST_TO_FACEBOOK: env("POST_TO_FACEBOOK") || "(unset)",
     POST_TO_FACEBOOK_STORY: env("POST_TO_FACEBOOK_STORY") || "(unset)",
+    POST_TO_INSTAGRAM: env("POST_TO_INSTAGRAM") || "(unset)",
     POST_TO_IG_STORY: env("POST_TO_IG_STORY") || "(unset)",
   });
   const longSiteLink = buildSiteArticleViewUrl(art.url);
-  const postLink =
-    (env("SHORTEN_LINK") === "1" || env("SHORTEN_LINK").toLowerCase() === "true")
-      ? await shortenUrl(longSiteLink)
-      : longSiteLink;
+  const sourceArticleLink = normalizeUrl(art.url) || art.url;
+  /** Default: full source article URL (no shortener). Set SOCIAL_USE_SITE_ARTICLE_LINK=1 for Radiant reader link. SHORTEN_LINK=1 still applies to whichever is chosen. */
+  let postLink = /^1|true|yes$/i.test(env("SOCIAL_USE_SITE_ARTICLE_LINK")) ? longSiteLink : sourceArticleLink;
+  if (env("SHORTEN_LINK") === "1" || env("SHORTEN_LINK").toLowerCase() === "true") {
+    postLink = await shortenUrl(postLink);
+  }
 
   const card = await generateCard(art.title, art.imageUrl, imageBufferValidated);
   const tg = await postTelegram(art.title, postLink, card);
   console.log("Posted to Telegram.");
 
   let imageUrlForIg = "";
-  try {
-    imageUrlForIg = await getTelegramFileUrl(env("TELEGRAM_BOT_TOKEN"), tg);
-  } catch {}
+  const imgbbKeyForSocial = env("IMGBB_API_KEY");
+  if (imgbbKeyForSocial) {
+    try {
+      const hosted = await uploadToImgbb(card, imgbbKeyForSocial, { name: "rw-card.png", mime: "image/png" });
+      if (hosted) {
+        imageUrlForIg = hosted;
+        console.log("[social] Public image URL for Instagram (imgbb card).");
+      }
+    } catch (e) {
+      console.warn("[social] imgbb upload for IG feed failed:", e?.message || e);
+    }
+  }
+  if (!imageUrlForIg) {
+    try {
+      imageUrlForIg = await getTelegramFileUrl(env("TELEGRAM_BOT_TOKEN"), tg);
+      if (imageUrlForIg) console.log("[social] Using Telegram file URL for Instagram.");
+    } catch {}
+  }
+  if (!imageUrlForIg) {
+    console.warn(
+      "[social] No public HTTPS image URL for Instagram — set IMGBB_API_KEY secret, or check Telegram getFile."
+    );
+  }
 
   await ensurePageAccessToken();
   const fbToken = env("FB_PAGE_ACCESS_TOKEN");
@@ -1125,7 +1148,7 @@ async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
     }
   }
 
-  if (fbToken && imageUrlForIg) {
+  if (envSocialEnabled("POST_TO_INSTAGRAM") && fbToken && imageUrlForIg) {
     try {
       const ig = await postInstagram(`${art.title}\n\n${postLink}`, imageUrlForIg);
       if (ig?.id) console.log("Posted to Instagram. Media id:", ig.id);
@@ -1149,6 +1172,8 @@ async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
         console.error("Instagram error:", firstErr);
       }
     }
+  } else if (envSocialEnabled("POST_TO_INSTAGRAM") && fbToken && !imageUrlForIg) {
+    console.warn("[social] Instagram feed skipped: no image URL (see IMGBB / Telegram notes above).");
   }
 
   if (envSocialEnabled("POST_TO_IG_STORY") && fbToken) {
