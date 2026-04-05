@@ -4,7 +4,10 @@ import zlib from "zlib";
 import sharp from "sharp";
 
 /** Increment when posting logic changes; Actions logs should show this (if not, fork `main` is behind). */
-const SOCIAL_POST_SCRIPT_REV = 4;
+const SOCIAL_POST_SCRIPT_REV = 6;
+
+const BROWSER_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
 
 const SNAPSHOT_LOCAL = path.join(process.cwd(), "snapshots", "latest.json.gz");
 const STATE_PATH = path.join(process.cwd(), "social_state.json");
@@ -137,7 +140,7 @@ function isLowQualityImageUrl(url) {
  * Defaults are a bit looser than OG-1200×630 so more feed images pass; tighten via env if needed.
  * SOCIAL_MIN_IMAGE_BYTES, SOCIAL_MIN_IMAGE_W, SOCIAL_MIN_IMAGE_H, SOCIAL_MIN_PIXELS, SOCIAL_IMAGE_AR_MIN/MAX
  */
-async function fetchValidatedImageBuffer(imageUrl) {
+async function fetchValidatedImageBuffer(imageUrl, fetchOpts = {}) {
   if (!imageUrl || isLowQualityImageUrl(imageUrl)) return null;
   const minBytes = Math.max(6000, Number(env("SOCIAL_MIN_IMAGE_BYTES", "10000")) || 10000);
   const minW = Math.max(320, Number(env("SOCIAL_MIN_IMAGE_W", "480")) || 480);
@@ -145,10 +148,11 @@ async function fetchValidatedImageBuffer(imageUrl) {
   const minPixels = Math.max(40_000, Number(env("SOCIAL_MIN_PIXELS", "120000")) || 120000);
   const arMin = Number(env("SOCIAL_IMAGE_AR_MIN", "0.5")) || 0.5;
   const arMax = Number(env("SOCIAL_IMAGE_AR_MAX", "3")) || 3;
+  const ua = fetchOpts.userAgent || "RadiantWaves/1.0 (Social Bot)";
   try {
     const res = await fetch(imageUrl, {
       signal: AbortSignal.timeout(20000),
-      headers: { "User-Agent": "RadiantWaves/1.0 (Social Bot)" },
+      headers: { "User-Agent": ua, Accept: "image/avif,image/webp,image/*,*/*;q=0.8" },
       redirect: "follow",
     });
     if (!res.ok) return null;
@@ -172,6 +176,108 @@ async function fetchValidatedImageBuffer(imageUrl) {
   } catch {
     return null;
   }
+}
+
+/** Parse article HTML for og:image / twitter:image (attribute order varies — use several patterns). */
+function extractOgImageCandidates(html, pageUrl) {
+  const out = [];
+  const seen = new Set();
+  const base = pageUrl || "";
+  const push = (raw) => {
+    if (!raw || typeof raw !== "string") return;
+    let s = raw.replace(/&amp;/g, "&").replace(/&#x2F;/gi, "/").trim();
+    if (s.startsWith("//")) s = "https:" + s;
+    try {
+      const abs = new URL(s, base).href;
+      if (!/^https?:\/\//i.test(abs)) return;
+      if (seen.has(abs)) return;
+      seen.add(abs);
+      if (!isLowQualityImageUrl(abs)) out.push(abs);
+    } catch {}
+  };
+
+  const patterns = [
+    /<meta[^>]+property=["']og:image:url["'][^>]+content=["']([^"']+)["']/gi,
+    /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/gi,
+    /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/gi,
+    /<meta[^>]+property=["']og:image:secure_url["'][^>]+content=["']([^"']+)["']/gi,
+    /<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/gi,
+    /<meta[^>]+content=["']([^"']+)["'][^>]+name=["']twitter:image["']/gi,
+    /<meta[^>]+name=["']twitter:image:src["'][^>]+content=["']([^"']+)["']/gi,
+    /<link[^>]+rel=["']image_src["'][^>]+href=["']([^"']+)["']/gi,
+  ];
+  for (const re of patterns) {
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(html))) push(m[1]);
+  }
+
+  let j;
+  const jsonLdImg = /"image"\s*:\s*\[?\s*"([^"]+\.(?:jpg|jpeg|png|webp)[^"]*)"/gi;
+  while ((j = jsonLdImg.exec(html))) push(j[1]);
+
+  return out;
+}
+
+/**
+ * Real hero image only: snapshot URL first, then fetch article page and use og:image / twitter:image.
+ * Returns null if nothing passes validation (no placeholder posts).
+ */
+async function resolveHeroImageBuffer(art) {
+  const pageUrl = normalizeUrl(art.url || art.link || "");
+  const snap = String(art.imageUrl || "").trim();
+
+  if (snap) {
+    const buf = await fetchValidatedImageBuffer(snap, { userAgent: BROWSER_UA });
+    if (buf) {
+      console.log("[social] Hero image from snapshot.");
+      return buf;
+    }
+    console.warn("[social] Snapshot image failed validation or fetch, trying article page OG tags…");
+  } else {
+    console.log("[social] No imageUrl in snapshot — fetching article page for og:image / twitter:image…");
+  }
+
+  if (/^1|true|yes$/i.test(env("SOCIAL_DISABLE_OG_IMAGE"))) return null;
+  if (!pageUrl) return null;
+
+  let html = "";
+  try {
+    const res = await fetch(pageUrl, {
+      signal: AbortSignal.timeout(25000),
+      headers: {
+        "User-Agent": BROWSER_UA,
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+      redirect: "follow",
+    });
+    if (!res.ok) {
+      console.warn("[social] Article page HTTP %s — cannot read OG image.", res.status);
+      return null;
+    }
+    html = await res.text();
+  } catch (e) {
+    console.warn("[social] Article page fetch failed:", e?.message || e);
+    return null;
+  }
+
+  const candidates = extractOgImageCandidates(html, pageUrl);
+  if (!candidates.length) {
+    console.warn("[social] No og:image / twitter:image candidates in HTML.");
+    return null;
+  }
+
+  for (let i = 0; i < Math.min(candidates.length, 12); i++) {
+    const u = candidates[i];
+    const buf = await fetchValidatedImageBuffer(u, { userAgent: BROWSER_UA });
+    if (buf) {
+      console.log("[social] Hero image from article page (candidate %d/%d).", i + 1, candidates.length);
+      return buf;
+    }
+  }
+  console.warn("[social] OG image URLs found but none passed size/quality checks.");
+  return null;
 }
 
 async function fetchRemoteGzJson(url) {
@@ -452,15 +558,23 @@ async function generateCard(title, articleImageUrl, imageBufferPreloaded = null)
   let image = imageBufferPreloaded;
   if (!image && articleImageUrl) {
     try {
-      const res = await fetch(articleImageUrl, { signal: AbortSignal.timeout(15000) });
+      const res = await fetch(articleImageUrl, {
+        signal: AbortSignal.timeout(15000),
+        headers: { "User-Agent": BROWSER_UA, Accept: "image/*,*/*;q=0.8" },
+        redirect: "follow",
+      });
       if (res.ok) image = Buffer.from(await res.arrayBuffer());
     } catch {}
   }
-  const imageBuf = image
-    ? await sharp(image).resize(IMAGE_W, IMAGE_H, { fit: "cover" }).toBuffer()
-    : await sharp({
-        create: { width: IMAGE_W, height: IMAGE_H, channels: 3, background: "#161a1f" },
-      }).png().toBuffer();
+  if (!image) {
+    throw new Error("generateCard: missing hero image (expected validated buffer from resolveHeroImageBuffer)");
+  }
+  let imageBuf;
+  try {
+    imageBuf = await sharp(image).resize(IMAGE_W, IMAGE_H, { fit: "cover" }).toBuffer();
+  } catch (e) {
+    throw new Error(`generateCard: could not decode/resize hero image (${e?.message || e})`);
+  }
 
   return sharp(bg).composite([{ input: imageBuf, top: IMAGE_TOP, left: IMAGE_LEFT }]).png().toBuffer();
 }
@@ -1125,20 +1239,15 @@ async function main() {
       process.exit(1);
     }
 
-    const buf = String(art.imageUrl || "").trim()
-      ? await fetchValidatedImageBuffer(art.imageUrl)
-      : null;
-    if (String(art.imageUrl || "").trim() && !buf) {
-      console.warn("[social] Image quality check failed, trying next article… (%s)", art.url.slice(0, 80));
+    const heroBuf = await resolveHeroImageBuffer(art);
+    if (!heroBuf) {
+      console.warn("[social] No usable hero image (snapshot + page OG), trying next article… (%s)", art.url.slice(0, 80));
       prependSkippedUrl(state, art.url);
       continue;
     }
-    if (!String(art.imageUrl || "").trim()) {
-      console.warn("[social] No snapshot image — posting postcard with placeholder art (%s)", art.url.slice(0, 80));
-    }
 
     try {
-      await performSocialPost(art, buf, state, targetFeed);
+      await performSocialPost(art, heroBuf, state, targetFeed);
       console.log("[social] SUCCESS: posted at least to Telegram (feed=%s).", targetFeed);
       process.exit(0);
     } catch (e) {
