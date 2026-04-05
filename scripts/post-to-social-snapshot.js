@@ -4,7 +4,7 @@ import zlib from "zlib";
 import sharp from "sharp";
 
 /** Increment when posting logic changes; Actions logs should show this (if not, fork `main` is behind). */
-const SOCIAL_POST_SCRIPT_REV = 13;
+const SOCIAL_POST_SCRIPT_REV = 14;
 
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
@@ -680,17 +680,18 @@ async function uploadUnpublishedPagePhotoCdnUrl(imageBuffer, filename, mime = "i
   if (data.error) throw new Error(data.error.message || "FB unpublished photo failed");
   const photoId = data.id || data.post_id;
   if (!photoId) throw new Error("No photo id from FB upload");
-  // Unpublished photos often omit `full_picture`; `source` / `images` still point at fbcdn.
+  // Photo node: `full_picture` is NOT valid (#100). Prefer largest `images[]` entry (has `source`); then `picture`.
   const picRes = await fetch(
-    `${GRAPH}/${encodeURIComponent(photoId)}?fields=full_picture,source,picture,images&access_token=${encodeURIComponent(token)}`
+    `${GRAPH}/${encodeURIComponent(photoId)}?fields=images,picture&access_token=${encodeURIComponent(token)}`
   );
   const pic = await picRes.json();
   if (pic.error) throw new Error(pic.error.message || "FB photo GET failed");
-  let url = pic.full_picture || pic.source || pic.picture;
-  if (!url && Array.isArray(pic.images) && pic.images.length) {
+  let url = "";
+  if (Array.isArray(pic.images) && pic.images.length) {
     const best = pic.images.reduce((a, b) => ((b.width || 0) > (a.width || 0) ? b : a));
-    url = best.source || best.picture;
+    url = best.source || best.picture || "";
   }
+  if (!url && pic.picture) url = pic.picture;
   if (!url || !/^https:\/\//i.test(url)) throw new Error("No CDN URL on FB photo (try pages_manage_posts + numeric FB_PAGE_ID)");
   return url;
 }
@@ -705,27 +706,25 @@ async function ensurePageAccessToken() {
   if (!raw) return;
 
   try {
-    const probeRes = await fetch(
-      `${GRAPH}/me?fields=id,name,instagram_business_account&access_token=${encodeURIComponent(raw)}`
-    );
+    const probeRes = await fetch(`${GRAPH}/me?fields=id,name&access_token=${encodeURIComponent(raw)}`);
     let probe = await probeRes.json();
-    if (!probe.error && probe.id && probe.instagram_business_account?.id) {
-      process.env.FB_PAGE_ID = String(probe.id);
-      console.log(
-        "[facebook] Page access token — Page id=%s, instagram_business_account id=%s (skip /me/accounts)",
-        probe.id,
-        probe.instagram_business_account.id
-      );
-      return;
-    }
     if (!probe.error && probe.id) {
-      const catRes = await fetch(
-        `${GRAPH}/${probe.id}?fields=category&access_token=${encodeURIComponent(raw)}`
+      const pageRes = await fetch(
+        `${GRAPH}/${probe.id}?fields=instagram_business_account,category&access_token=${encodeURIComponent(raw)}`
       );
-      const catd = await catRes.json();
-      if (!catd.error && typeof catd.category === "string" && catd.category.length > 0) {
+      const pageFields = await pageRes.json();
+      if (!pageFields.error && pageFields.instagram_business_account?.id) {
         process.env.FB_PAGE_ID = String(probe.id);
-        console.log("[facebook] Page token (category=%s) — Page id=%s", catd.category, probe.id);
+        console.log(
+          "[facebook] Page access token — Page id=%s, instagram_business_account id=%s (skip /me/accounts)",
+          probe.id,
+          pageFields.instagram_business_account.id
+        );
+        return;
+      }
+      if (!pageFields.error && typeof pageFields.category === "string" && pageFields.category.length > 0) {
+        process.env.FB_PAGE_ID = String(probe.id);
+        console.log("[facebook] Page token (category=%s) — Page id=%s", pageFields.category, probe.id);
         return;
       }
     }
