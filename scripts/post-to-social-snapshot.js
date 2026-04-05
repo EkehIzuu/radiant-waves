@@ -4,7 +4,7 @@ import zlib from "zlib";
 import sharp from "sharp";
 
 /** Increment when posting logic changes; Actions logs should show this (if not, fork `main` is behind). */
-const SOCIAL_POST_SCRIPT_REV = 11;
+const SOCIAL_POST_SCRIPT_REV = 13;
 
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
@@ -658,6 +658,44 @@ async function buildInstagramFeedJpegFromCard(cardPngBuffer) {
 }
 
 /**
+ * Instagram's servers often cannot fetch imgbb/Telegram URLs (2207052). Upload an unpublished Page photo
+ * and use the returned fbcdn URL — same CDN family Meta trusts for image_url.
+ */
+async function uploadUnpublishedPagePhotoCdnUrl(imageBuffer, filename, mime = "image/jpeg") {
+  const token = env("FB_PAGE_ACCESS_TOKEN");
+  const pageId = env("FB_PAGE_ID", "me").trim();
+  if (!token || !pageId || pageId === "me") {
+    throw new Error("Need numeric FB_PAGE_ID (not me) for Facebook CDN staging");
+  }
+  const form = new FormData();
+  form.append("published", "false");
+  form.append("access_token", token);
+  if (typeof File !== "undefined") {
+    form.append("source", new File([imageBuffer], filename, { type: mime }));
+  } else {
+    form.append("source", new Blob([imageBuffer], { type: mime }), filename);
+  }
+  const res = await fetch(`${GRAPH}/${encodeURIComponent(pageId)}/photos`, { method: "POST", body: form });
+  const data = await res.json();
+  if (data.error) throw new Error(data.error.message || "FB unpublished photo failed");
+  const photoId = data.id || data.post_id;
+  if (!photoId) throw new Error("No photo id from FB upload");
+  // Unpublished photos often omit `full_picture`; `source` / `images` still point at fbcdn.
+  const picRes = await fetch(
+    `${GRAPH}/${encodeURIComponent(photoId)}?fields=full_picture,source,picture,images&access_token=${encodeURIComponent(token)}`
+  );
+  const pic = await picRes.json();
+  if (pic.error) throw new Error(pic.error.message || "FB photo GET failed");
+  let url = pic.full_picture || pic.source || pic.picture;
+  if (!url && Array.isArray(pic.images) && pic.images.length) {
+    const best = pic.images.reduce((a, b) => ((b.width || 0) > (a.width || 0) ? b : a));
+    url = best.source || best.picture;
+  }
+  if (!url || !/^https:\/\//i.test(url)) throw new Error("No CDN URL on FB photo (try pages_manage_posts + numeric FB_PAGE_ID)");
+  return url;
+}
+
+/**
  * User tokens hit /me/feed as the USER → publish_actions errors.
  * Resolve a Page access token: GET /{page-id}?fields=access_token or GET /me/accounts.
  * Page access tokens: GET /me returns the Page — do NOT call /me/accounts (user-only); that breaks IG.
@@ -668,31 +706,30 @@ async function ensurePageAccessToken() {
 
   try {
     const probeRes = await fetch(
-      `${GRAPH}/me?fields=id,name,fan_count,instagram_business_account,tasks&access_token=${encodeURIComponent(raw)}`
+      `${GRAPH}/me?fields=id,name,instagram_business_account&access_token=${encodeURIComponent(raw)}`
     );
-    const probe = await probeRes.json();
-    if (!probe.error) {
-      const looksLikePage =
-        typeof probe.fan_count === "number" ||
-        Array.isArray(probe.tasks) ||
-        probe.instagram_business_account != null;
-      if (looksLikePage && probe.id) {
+    let probe = await probeRes.json();
+    if (!probe.error && probe.id && probe.instagram_business_account?.id) {
+      process.env.FB_PAGE_ID = String(probe.id);
+      console.log(
+        "[facebook] Page access token — Page id=%s, instagram_business_account id=%s (skip /me/accounts)",
+        probe.id,
+        probe.instagram_business_account.id
+      );
+      return;
+    }
+    if (!probe.error && probe.id) {
+      const catRes = await fetch(
+        `${GRAPH}/${probe.id}?fields=category&access_token=${encodeURIComponent(raw)}`
+      );
+      const catd = await catRes.json();
+      if (!catd.error && typeof catd.category === "string" && catd.category.length > 0) {
         process.env.FB_PAGE_ID = String(probe.id);
-        if (probe.instagram_business_account?.id) {
-          console.log(
-            "[facebook] Page access token detected — Page id=%s, instagram_business_account id=%s (skip /me/accounts)",
-            probe.id,
-            probe.instagram_business_account.id
-          );
-        } else {
-          console.warn(
-            "[facebook] Page access token — Page id=%s but no instagram_business_account. Link IG in Meta Business Suite (Page → settings).",
-            probe.id
-          );
-        }
+        console.log("[facebook] Page token (category=%s) — Page id=%s", catd.category, probe.id);
         return;
       }
-    } else {
+    }
+    if (probe.error) {
       console.warn("[facebook] GET /me (token probe):", probe.error.message);
     }
   } catch (e) {
@@ -1213,18 +1250,37 @@ async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
   const tg = await postTelegram(art.title, postLink, card);
   console.log("Posted to Telegram.");
 
+  await ensurePageAccessToken();
+
+  const useFbCdnForIg = !/^1|true|yes$/i.test(env("SOCIAL_DISABLE_FB_CDN_FOR_IG"));
+  const pageIdForIg = env("FB_PAGE_ID", "me").trim();
+  console.log(
+    "[social] Instagram staging rev=%s: fbcdn_first=%s FB_PAGE_ID=%s (need numeric id for fbcdn; if logs show rev<13, push latest post-to-social-snapshot.js)",
+    SOCIAL_POST_SCRIPT_REV,
+    useFbCdnForIg ? "yes" : "no",
+    !pageIdForIg || pageIdForIg === "me" ? "missing_or_me" : "numeric"
+  );
   let imageUrlForIg = "";
   const imgbbKeyForSocial = env("IMGBB_API_KEY");
-  if (imgbbKeyForSocial) {
+  const igFeedJpeg = await buildInstagramFeedJpegFromCard(card);
+
+  if (useFbCdnForIg) {
     try {
-      const igFeedJpeg = await buildInstagramFeedJpegFromCard(card);
+      imageUrlForIg = await uploadUnpublishedPagePhotoCdnUrl(igFeedJpeg, "ig-feed-4x5.jpg", "image/jpeg");
+      console.log("[social] Instagram feed image URL via Facebook CDN (unpublished Page photo → fbcdn).");
+    } catch (e) {
+      console.warn("[social] Facebook CDN for IG feed failed:", e?.message || e);
+    }
+  }
+  if (!imageUrlForIg && imgbbKeyForSocial) {
+    try {
       let hosted = await uploadToImgbb(igFeedJpeg, imgbbKeyForSocial, { name: "ig-feed-4x5.jpg", mime: "image/jpeg" });
       if (!hosted) {
         hosted = await uploadToImgbb(card, imgbbKeyForSocial, { name: "rw-card-fallback.png", mime: "image/png" });
       }
       if (hosted) {
         imageUrlForIg = hosted;
-        console.log("[social] Public image URL for Instagram feed (4:5 JPEG via imgbb):", hosted.slice(0, 72) + "…");
+        console.log("[social] Instagram feed image URL (imgbb fallback):", hosted.slice(0, 72) + "…");
       }
     } catch (e) {
       console.warn("[social] imgbb upload for IG feed failed:", e?.message || e);
@@ -1238,11 +1294,9 @@ async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
   }
   if (!imageUrlForIg) {
     console.warn(
-      "[social] No public HTTPS image URL for Instagram — set IMGBB_API_KEY secret, or check Telegram getFile."
+      "[social] No public HTTPS image URL for Instagram — enable Facebook CDN (numeric FB_PAGE_ID), or IMGBB_API_KEY, or Telegram getFile."
     );
   }
-
-  await ensurePageAccessToken();
   const fbToken = env("FB_PAGE_ACCESS_TOKEN");
   if (fbToken) {
     await logFacebookTokenIdentity(fbToken);
@@ -1375,21 +1429,32 @@ async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
   }
 
   if (envSocialEnabled("POST_TO_IG_STORY") && fbToken) {
-    console.log("[social] Instagram Story (1080×1920 JPEG via imgbb when set)…");
+    console.log("[social] Instagram Story (1080×1920 JPEG)…");
     const imgbbKey = env("IMGBB_API_KEY");
     try {
-      if (imgbbKey) {
-        const jpg = await buildStoryJpegFromCard(card);
-        const hosted = await uploadToImgbb(jpg, imgbbKey, { name: "ig-story.jpg", mime: "image/jpeg" });
-        if (!hosted) throw new Error("imgbb upload failed");
-        const igs = await postInstagramStory(hosted);
+      const jpg = await buildStoryJpegFromCard(card);
+      let storyUrl = "";
+      if (useFbCdnForIg) {
+        try {
+          storyUrl = await uploadUnpublishedPagePhotoCdnUrl(jpg, "ig-story.jpg", "image/jpeg");
+          console.log("[social] IG Story image URL via Facebook CDN (fbcdn).");
+        } catch (e) {
+          console.warn("[social] Facebook CDN for IG story failed:", e?.message || e);
+        }
+      }
+      if (!storyUrl && imgbbKey) {
+        storyUrl = await uploadToImgbb(jpg, imgbbKey, { name: "ig-story.jpg", mime: "image/jpeg" });
+        if (storyUrl) console.log("[social] IG Story image URL via imgbb fallback.");
+      }
+      if (storyUrl) {
+        const igs = await postInstagramStory(storyUrl);
         if (igs?.id) console.log("Posted to Instagram Story. Media id:", igs.id);
       } else if (imageUrlForIg) {
-        console.warn("[IG Story] No IMGBB_API_KEY — trying Telegram URL (often fails for STORIES).");
+        console.warn("[IG Story] No FB CDN/imgbb — trying prior IG image URL (may fail).");
         const igs = await postInstagramStory(imageUrlForIg);
         if (igs?.id) console.log("Posted to Instagram Story. Media id:", igs.id);
       } else {
-        console.warn("[IG Story] Skipped: set IMGBB_API_KEY for reliable Stories, or ensure Telegram image URL exists.");
+        console.warn("[IG Story] Skipped: no staging URL (set numeric FB_PAGE_ID for Facebook CDN).");
       }
     } catch (e) {
       console.error("Instagram Story error:", e?.message || e);

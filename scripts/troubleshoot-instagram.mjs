@@ -31,9 +31,9 @@ async function main() {
     process.exit(1);
   }
 
-  console.log("1) GET /me?fields=id,name,category,fan_count,tasks,instagram_business_account");
+  console.log("1) GET /me?fields=id,name,category,tasks,instagram_business_account (fan_count omitted — often #100 on Page tokens)");
   const meRes = await fetch(
-    `${GRAPH}/me?fields=id,name,category,fan_count,tasks,instagram_business_account&access_token=${encodeURIComponent(token)}`
+    `${GRAPH}/me?fields=id,name,category,tasks,instagram_business_account&access_token=${encodeURIComponent(token)}`
   );
   const me = await meRes.json();
   console.log(JSON.stringify(me, null, 2));
