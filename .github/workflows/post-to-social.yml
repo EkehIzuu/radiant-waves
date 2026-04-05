@@ -70,6 +70,8 @@ jobs:
           BITLY_ACCESS_TOKEN: ${{ secrets.BITLY_ACCESS_TOKEN }}
           # Strongly recommended for Instagram feed + story (public HTTPS image URL).
           IMGBB_API_KEY: ${{ secrets.IMGBB_API_KEY }}
+          # Set to 1 for extra IG logs: Page↔IG link probe, HEAD image URL, Graph error JSON.
+          SOCIAL_DEBUG_IG: ${{ vars.SOCIAL_DEBUG_IG }}
         run: node scripts/post-to-social-snapshot.js
 
       - name: Save social state back to repo

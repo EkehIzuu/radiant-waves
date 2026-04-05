@@ -4,7 +4,7 @@ import zlib from "zlib";
 import sharp from "sharp";
 
 /** Increment when posting logic changes; Actions logs should show this (if not, fork `main` is behind). */
-const SOCIAL_POST_SCRIPT_REV = 8;
+const SOCIAL_POST_SCRIPT_REV = 9;
 
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
@@ -713,6 +713,94 @@ function igPublicImageUrl(imageUrl) {
   return s;
 }
 
+function igDebugEnabled() {
+  return /^1|true|yes$/i.test(env("SOCIAL_DEBUG_IG"));
+}
+
+/** Meta Graph `error` objects — log these for support / Graph API Explorer. */
+function formatMetaApiError(err) {
+  if (!err || typeof err !== "object") return String(err);
+  try {
+    return JSON.stringify({
+      message: err.message,
+      type: err.type,
+      code: err.code,
+      error_subcode: err.error_subcode,
+      error_user_title: err.error_user_title,
+      error_user_msg: err.error_user_msg,
+      fbtrace_id: err.fbtrace_id,
+      is_transient: err.is_transient,
+    });
+  } catch {
+    return String(err);
+  }
+}
+
+/** Log why IG may be skipped + probe Page ↔ IG link (SOCIAL_DEBUG_IG=1). */
+async function logInstagramTroubleshoot(imageUrlForIg, fbToken) {
+  const wantIg = envSocialEnabled("POST_TO_INSTAGRAM");
+  let imageHost = "";
+  try {
+    if (imageUrlForIg) imageHost = new URL(igPublicImageUrl(imageUrlForIg)).hostname;
+  } catch {}
+  console.log("[IG troubleshoot] gate:", {
+    scriptRev: SOCIAL_POST_SCRIPT_REV,
+    POST_TO_INSTAGRAM: env("POST_TO_INSTAGRAM") || "(unset → default on)",
+    wantIg,
+    hasFbPageToken: !!fbToken,
+    hasPublicImageUrl: !!String(imageUrlForIg || "").trim(),
+    imageUrlHost: imageHost || "(none)",
+    IMGBB_API_KEY: env("IMGBB_API_KEY") ? "set" : "MISSING — add repo secret for hosted image URL",
+    IG_USER_ID: env("IG_USER_ID") || "(unset — resolved from Page)",
+    FB_PAGE_ID: env("FB_PAGE_ID") || "(unset — use numeric Page id)",
+  });
+
+  if (!wantIg) {
+    console.warn("[IG troubleshoot] Skipped: POST_TO_INSTAGRAM is off (set var to 1 or unset).");
+    return;
+  }
+  if (!fbToken) {
+    console.warn("[IG troubleshoot] Skipped: FB_PAGE_ACCESS_TOKEN missing — IG uses the same Page token.");
+    return;
+  }
+  if (!String(imageUrlForIg || "").trim()) {
+    console.warn(
+      "[IG troubleshoot] Skipped: no public image URL — add IMGBB_API_KEY secret, or fix Telegram sendPhoto → getFile."
+    );
+    return;
+  }
+
+  if (igDebugEnabled()) {
+    const pageId = env("FB_PAGE_ID", "me");
+    try {
+      const res = await fetch(
+        `${GRAPH}/${encodeURIComponent(pageId)}?fields=id,name,instagram_business_account&access_token=${encodeURIComponent(fbToken)}`
+      );
+      const data = await res.json();
+      console.log("[IG troubleshoot] GET /{page-id}?fields=instagram_business_account →", JSON.stringify(data));
+      const igAcct = data.instagram_business_account;
+      if (!igAcct?.id) {
+        console.error(
+          "[IG troubleshoot] No instagram_business_account on this Page. In Meta Business Suite: connect this Facebook Page to an Instagram Business/Creator account."
+        );
+      }
+    } catch (e) {
+      console.error("[IG troubleshoot] Page probe failed:", e?.message || e);
+    }
+    try {
+      const probe = await fetch(igPublicImageUrl(imageUrlForIg), {
+        method: "HEAD",
+        signal: AbortSignal.timeout(15000),
+        redirect: "follow",
+        headers: { "User-Agent": BROWSER_UA },
+      });
+      console.log("[IG troubleshoot] HEAD image URL → HTTP", probe.status, probe.headers.get("content-type") || "");
+    } catch (e) {
+      console.error("[IG troubleshoot] Image URL not reachable from runner:", e?.message || e);
+    }
+  }
+}
+
 async function postInstagram(caption, imageUrl) {
   const token = env("FB_PAGE_ACCESS_TOKEN");
   const pageId = env("FB_PAGE_ID", "me");
@@ -739,11 +827,13 @@ async function postInstagram(caption, imageUrl) {
   const createRes = await fetch(`${graph}/${igUserId}/media`, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: createParams });
   const createData = await createRes.json();
   if (createData.error) {
+    console.error("[IG] POST /media failed:", formatMetaApiError(createData.error));
     const er = createData.error;
     throw new Error(
       er.message || "Instagram media create failed" + (er.code != null ? ` [${er.code}]` : "") + (er.error_subcode != null ? ` sub=${er.error_subcode}` : "")
     );
   }
+  console.log("[IG] media container created id=%s (ig_user_id=%s)", createData.id, igUserId);
 
   const creationId = createData.id;
   await waitForIgMediaContainer(creationId, token, "Instagram feed");
@@ -759,6 +849,9 @@ async function postInstagram(caption, imageUrl) {
     if (!pubData.error) return pubData;
 
     const msg = pubData.error?.message || "Instagram publish failed";
+    if (!msg.includes("Media ID is not available") && !msg.includes("not ready")) {
+      console.error("[IG] POST /media_publish failed:", formatMetaApiError(pubData.error));
+    }
     const retryable = msg.includes("Media ID is not available") || msg.includes("not ready");
     if (!retryable || attempt === 4) {
       const er = pubData.error;
@@ -845,6 +938,7 @@ async function postInstagramStory(imageUrl) {
   });
   const createData = await createRes.json();
   if (createData.error) {
+    console.error("[IG Story] POST /media failed:", formatMetaApiError(createData.error));
     const err = createData.error;
     throw new Error(
       err.message || "Instagram story media create failed" + (err.code ? ` (code ${err.code})` : "")
@@ -1083,6 +1177,7 @@ async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
   if (fbToken) {
     await logFacebookTokenIdentity(fbToken);
   }
+  await logInstagramTroubleshoot(imageUrlForIg, fbToken);
 
   const wantFbFeed = envSocialEnabled("POST_TO_FACEBOOK");
   if (wantFbFeed && !fbToken) {
@@ -1194,10 +1289,15 @@ async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
         }
       } else {
         console.error("Instagram error:", firstErr);
+        if (igDebugEnabled()) console.error("Instagram error stack:", e?.stack);
       }
     }
-  } else if (envSocialEnabled("POST_TO_INSTAGRAM") && fbToken && !imageUrlForIg) {
-    console.warn("[social] Instagram feed skipped: no image URL (see IMGBB / Telegram notes above).");
+  } else if (!envSocialEnabled("POST_TO_INSTAGRAM")) {
+    console.warn("[social] Instagram feed skipped: POST_TO_INSTAGRAM is disabled.");
+  } else if (!fbToken) {
+    console.warn("[social] Instagram feed skipped: no FB_PAGE_ACCESS_TOKEN.");
+  } else if (!imageUrlForIg) {
+    console.warn("[social] Instagram feed skipped: no image URL (IMGBB_API_KEY or Telegram file URL).");
   }
 
   if (envSocialEnabled("POST_TO_IG_STORY") && fbToken) {
