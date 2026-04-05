@@ -4,7 +4,7 @@ import zlib from "zlib";
 import sharp from "sharp";
 
 /** Increment when posting logic changes; Actions logs should show this (if not, fork `main` is behind). */
-const SOCIAL_POST_SCRIPT_REV = 10;
+const SOCIAL_POST_SCRIPT_REV = 11;
 
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
@@ -604,6 +604,23 @@ async function getTelegramFileUrl(botToken, sendPhotoBody) {
   return filePath ? `https://api.telegram.org/file/bot${botToken}/${filePath}` : "";
 }
 
+/** imgbb: `data.url` is often https://ibb.co/... (HTML viewer). IG must fetch a raw image — use `data.image.url` (i.ibb.co). */
+function imgbbDirectImageUrl(apiJson) {
+  const d = apiJson?.data;
+  if (!d) return "";
+  const fromImage = d.image?.url || d.image?.display_url;
+  const disp = typeof d.display_url === "string" ? d.display_url : "";
+  const top = typeof d.url === "string" ? d.url : "";
+  const candidates = [fromImage, disp, top].filter(Boolean);
+  for (const c of candidates) {
+    if (!/^https:\/\//i.test(c)) continue;
+    if (/^https:\/\/i\.ibb\.co\//i.test(c) || /\.(jpe?g|png|webp)(\?|$)/i.test(c)) return c;
+  }
+  if (fromImage && /^https:\/\//i.test(fromImage)) return fromImage;
+  console.warn("[imgbb] No direct i.ibb.co / image URL in response; got:", JSON.stringify({ url: top, display_url: disp }).slice(0, 200));
+  return "";
+}
+
 async function uploadToImgbb(imageBuffer, apiKey, opts = {}) {
   if (!apiKey || !imageBuffer?.length) return "";
   const name = opts.name || "image.png";
@@ -613,8 +630,8 @@ async function uploadToImgbb(imageBuffer, apiKey, opts = {}) {
   form.append("image", new Blob([imageBuffer], { type: mime }), name);
   const res = await fetch("https://api.imgbb.com/1/upload", { method: "POST", body: form });
   const data = await res.json();
-  const url = data?.data?.image?.url ?? data?.data?.url;
-  if (url && url.startsWith("http")) return url;
+  const url = imgbbDirectImageUrl(data);
+  if (url) return url;
   console.error("[imgbb] upload did not return a URL. success=%s status=%s body=%s", data?.success, res.status, JSON.stringify(data).slice(0, 800));
   return "";
 }
@@ -624,6 +641,19 @@ async function buildStoryJpegFromCard(cardPngBuffer) {
   return sharp(cardPngBuffer)
     .resize(1080, 1920, { fit: "cover", position: "centre" })
     .jpeg({ quality: 88, mozjpeg: true })
+    .toBuffer();
+}
+
+/**
+ * IG feed Graph API: image aspect ratio must be between 4:5 and 1.91:1 (width/height).
+ * Our postcard is ~2:3 — too tall; Meta returns 2207052. Use 4:5 (1080×1350) cover crop + JPEG.
+ */
+async function buildInstagramFeedJpegFromCard(cardPngBuffer) {
+  const W = 1080;
+  const H = 1350; // 4:5
+  return sharp(cardPngBuffer)
+    .resize(W, H, { fit: "cover", position: "centre" })
+    .jpeg({ quality: 90, mozjpeg: true })
     .toBuffer();
 }
 
@@ -638,14 +668,13 @@ async function ensurePageAccessToken() {
 
   try {
     const probeRes = await fetch(
-      `${GRAPH}/me?fields=id,name,category,fan_count,instagram_business_account,tasks&access_token=${encodeURIComponent(raw)}`
+      `${GRAPH}/me?fields=id,name,fan_count,instagram_business_account,tasks&access_token=${encodeURIComponent(raw)}`
     );
     const probe = await probeRes.json();
     if (!probe.error) {
       const looksLikePage =
         typeof probe.fan_count === "number" ||
         Array.isArray(probe.tasks) ||
-        (typeof probe.category === "string" && probe.category.length > 0) ||
         probe.instagram_business_account != null;
       if (looksLikePage && probe.id) {
         process.env.FB_PAGE_ID = String(probe.id);
@@ -1188,10 +1217,14 @@ async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
   const imgbbKeyForSocial = env("IMGBB_API_KEY");
   if (imgbbKeyForSocial) {
     try {
-      const hosted = await uploadToImgbb(card, imgbbKeyForSocial, { name: "rw-card.png", mime: "image/png" });
+      const igFeedJpeg = await buildInstagramFeedJpegFromCard(card);
+      let hosted = await uploadToImgbb(igFeedJpeg, imgbbKeyForSocial, { name: "ig-feed-4x5.jpg", mime: "image/jpeg" });
+      if (!hosted) {
+        hosted = await uploadToImgbb(card, imgbbKeyForSocial, { name: "rw-card-fallback.png", mime: "image/png" });
+      }
       if (hosted) {
         imageUrlForIg = hosted;
-        console.log("[social] Public image URL for Instagram (imgbb card).");
+        console.log("[social] Public image URL for Instagram feed (4:5 JPEG via imgbb):", hosted.slice(0, 72) + "…");
       }
     } catch (e) {
       console.warn("[social] imgbb upload for IG feed failed:", e?.message || e);
@@ -1317,7 +1350,11 @@ async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
           const tgImgRes = await fetch(imageUrlForIg, { signal: AbortSignal.timeout(15000) });
           if (!tgImgRes.ok) throw new Error("Failed to download Telegram image for imgbb");
           const buf = Buffer.from(await tgImgRes.arrayBuffer());
-          const hosted = await uploadToImgbb(buf, imgbbKey);
+          const igJpeg = await sharp(buf)
+            .resize(1080, 1350, { fit: "cover", position: "centre" })
+            .jpeg({ quality: 90, mozjpeg: true })
+            .toBuffer();
+          const hosted = await uploadToImgbb(igJpeg, imgbbKey, { name: "ig-tg-4x5.jpg", mime: "image/jpeg" });
           if (!hosted) throw new Error("imgbb upload failed");
           const ig2 = await postInstagram(`${art.title}\n\n${postLink}`, hosted);
           if (ig2?.id) console.log("Posted to Instagram (imgbb fallback). Media id:", ig2.id);
