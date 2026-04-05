@@ -4,7 +4,7 @@ import zlib from "zlib";
 import sharp from "sharp";
 
 /** Increment when posting logic changes; Actions logs should show this (if not, fork `main` is behind). */
-const SOCIAL_POST_SCRIPT_REV = 3;
+const SOCIAL_POST_SCRIPT_REV = 4;
 
 const SNAPSHOT_LOCAL = path.join(process.cwd(), "snapshots", "latest.json.gz");
 const STATE_PATH = path.join(process.cwd(), "social_state.json");
@@ -101,7 +101,7 @@ function getPostedUrlSet(state) {
   const set = new Set();
   for (const u of arr) {
     if (typeof u !== "string" || !/^https?:\/\//i.test(u)) continue;
-    const n = normalizeUrlForDedupe(u);
+    const n = postedUrlDedupeKey(u);
     if (n) set.add(n);
   }
   return set;
@@ -301,6 +301,27 @@ function normalizeUrlForDedupe(raw) {
   }
 }
 
+/**
+ * Keys for posted_urls / "already posted" checks. Hash-router article links (`#/article?u=…`) must
+ * keep the fragment — normalizeUrl strips `#`, which collapsed every on-site article to the same origin
+ * and blocked an entire feed after one post.
+ */
+function postedUrlDedupeKey(raw) {
+  if (!raw || typeof raw !== "string") return "";
+  const s = raw.replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").trim();
+  if (!/^https?:\/\//i.test(s)) return "";
+  try {
+    const u = new URL(s);
+    const h = u.hash || "";
+    if (h.includes("u=") && /article/i.test(h)) {
+      u.hostname = u.hostname.toLowerCase();
+      if (u.pathname.length > 1 && u.pathname.endsWith("/")) u.pathname = u.pathname.slice(0, -1);
+      return u.origin + u.pathname + (u.search || "") + h;
+    }
+  } catch {}
+  return normalizeUrlForDedupe(raw);
+}
+
 function buildSiteArticleViewUrl(sourceUrl) {
   const site = env("SITE_URL", "https://radiant-waves.com.ng").replace(/\/+$/, "");
   return `${site}/#/article?u=${encodeURIComponent(sourceUrl)}`;
@@ -349,8 +370,8 @@ function pickLatestUnposted(items, state) {
     if (requireImg && !imageUrl) continue;
     if (imageUrl && isLowQualityImageUrl(imageUrl)) continue;
     if (postedSet.has(url)) continue;
-    const siteArticleView = normalizeUrlForDedupe(buildSiteArticleViewUrl(url));
-    if (siteArticleView && postedSet.has(siteArticleView)) continue;
+    const siteKey = postedUrlDedupeKey(buildSiteArticleViewUrl(url));
+    if (siteKey && postedSet.has(siteKey)) continue;
     if (skippedSet.has(url)) continue;
     return {
       id: it.id || "",
@@ -376,8 +397,8 @@ function logNoCandidatesDiagnostics(items, state) {
       blockedByPosted++;
       continue;
     }
-    const siteArticleView = normalizeUrlForDedupe(buildSiteArticleViewUrl(url));
-    if (siteArticleView && postedSet.has(siteArticleView)) blockedByPosted++;
+    const siteKey = postedUrlDedupeKey(buildSiteArticleViewUrl(url));
+    if (siteKey && postedSet.has(siteKey)) blockedByPosted++;
   }
   console.error(
     "[social] Diagnostics (feed pool): articles with url=%d, with image field=%d, blocked by posted_urls≈%d",
@@ -1040,9 +1061,9 @@ async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
 
   const postedKey = normalizeUrlForDedupe(art.url);
   const postLinkKey = normalizeUrlForDedupe(postLink);
-  const longSiteLinkNorm = normalizeUrlForDedupe(longSiteLink);
+  const longSiteLinkKey = postedUrlDedupeKey(longSiteLink);
   const prevPosted = Array.isArray(state?.posted_urls) ? state.posted_urls : [];
-  const mergedPosted = [postedKey, postLinkKey, longSiteLinkNorm, ...prevPosted.map((u) => normalizeUrlForDedupe(u))]
+  const mergedPosted = [postedKey, postLinkKey, longSiteLinkKey, ...prevPosted.map((u) => postedUrlDedupeKey(u))]
     .filter((u, i, a) => u && a.indexOf(u) === i)
     .slice(0, 5000);
 
@@ -1060,7 +1081,7 @@ async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
 
 async function main() {
   console.log(
-    "[social] script rev=%s (want ≥3 on fork) | repo=%s | sha=%s",
+    "[social] script rev=%s | repo=%s | sha=%s",
     SOCIAL_POST_SCRIPT_REV,
     env("GITHUB_REPOSITORY") || "(local)",
     env("GITHUB_SHA") ? env("GITHUB_SHA").slice(0, 7) : "(local)"
