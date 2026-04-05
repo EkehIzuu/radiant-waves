@@ -4,7 +4,7 @@ import zlib from "zlib";
 import sharp from "sharp";
 
 /** Increment when posting logic changes; Actions logs should show this (if not, fork `main` is behind). */
-const SOCIAL_POST_SCRIPT_REV = 7;
+const SOCIAL_POST_SCRIPT_REV = 8;
 
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
@@ -706,11 +706,20 @@ async function logFacebookTokenIdentity(token) {
   }
 }
 
+function igPublicImageUrl(imageUrl) {
+  if (!imageUrl || typeof imageUrl !== "string") return "";
+  const s = imageUrl.trim();
+  if (s.startsWith("http://")) return `https://${s.slice("http://".length)}`;
+  return s;
+}
+
 async function postInstagram(caption, imageUrl) {
   const token = env("FB_PAGE_ACCESS_TOKEN");
   const pageId = env("FB_PAGE_ID", "me");
   const igUserIdFromEnv = env("IG_USER_ID");
-  if (!token || !imageUrl) return null;
+  const imageUrlHttps = igPublicImageUrl(imageUrl);
+  if (!token || !imageUrlHttps) return null;
+  if (!/^https:\/\//i.test(imageUrlHttps)) throw new Error("Instagram requires a public https:// image_url");
 
   const graph = GRAPH;
   let igUserId = igUserIdFromEnv;
@@ -723,15 +732,22 @@ async function postInstagram(caption, imageUrl) {
   if (!igUserId) throw new Error("No Instagram Business account linked.");
 
   const createParams = new URLSearchParams({
-    image_url: imageUrl,
+    image_url: imageUrlHttps,
     caption: caption.slice(0, 2200),
     access_token: token,
   });
   const createRes = await fetch(`${graph}/${igUserId}/media`, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: createParams });
   const createData = await createRes.json();
-  if (createData.error) throw new Error(createData.error.message || "Instagram media create failed");
+  if (createData.error) {
+    const er = createData.error;
+    throw new Error(
+      er.message || "Instagram media create failed" + (er.code != null ? ` [${er.code}]` : "") + (er.error_subcode != null ? ` sub=${er.error_subcode}` : "")
+    );
+  }
 
   const creationId = createData.id;
+  await waitForIgMediaContainer(creationId, token, "Instagram feed");
+
   for (let attempt = 1; attempt <= 4; attempt++) {
     const pubParams = new URLSearchParams({ creation_id: creationId, access_token: token });
     const pubRes = await fetch(`${graph}/${igUserId}/media_publish`, {
@@ -743,8 +759,11 @@ async function postInstagram(caption, imageUrl) {
     if (!pubData.error) return pubData;
 
     const msg = pubData.error?.message || "Instagram publish failed";
-    const retryable = msg.includes("Media ID is not available");
-    if (!retryable || attempt === 4) throw new Error(msg);
+    const retryable = msg.includes("Media ID is not available") || msg.includes("not ready");
+    if (!retryable || attempt === 4) {
+      const er = pubData.error;
+      throw new Error(msg + (er?.code != null ? ` [${er.code}]` : ""));
+    }
     await new Promise((resolve) => setTimeout(resolve, 4000 * attempt));
   }
   throw new Error("Instagram publish failed");
@@ -767,35 +786,41 @@ async function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-/** Wait until IG container is ready (feed + stories). */
+/** Wait until IG container is ready (feed + stories). Meta may take 10–40s to process image_url. */
 async function waitForIgMediaContainer(containerId, token, label = "IG") {
-  for (let i = 0; i < 12; i++) {
+  for (let i = 0; i < 24; i++) {
     const res = await fetch(
-      `${GRAPH}/${encodeURIComponent(containerId)}?fields=status_code&access_token=${encodeURIComponent(token)}`
+      `${GRAPH}/${encodeURIComponent(containerId)}?fields=status_code,status&access_token=${encodeURIComponent(token)}`
     );
     const data = await res.json();
     if (data.error) throw new Error(data.error.message || `${label} container status failed`);
-    const code = data.status_code;
+    const code = data.status_code || data.status;
     if (code === "FINISHED" || code === "PUBLISHED") return;
     if (code === "ERROR") throw new Error(`${label} container failed`);
-    // undefined / IN_PROGRESS / EXPIRED — keep polling
+    if (i === 0 || i % 4 === 3) console.log(`[${label}] container ${containerId} status=${code || "…"} (poll ${i + 1}/24)`);
     await sleep(2500);
   }
+  console.warn(`[${label}] container still not FINISHED after ~60s — trying media_publish anyway.`);
 }
 
 async function verifyHttpsImageUrlForInstagram(imageUrl) {
-  if (!imageUrl || !/^https:\/\//i.test(imageUrl)) {
+  const u = igPublicImageUrl(imageUrl);
+  if (!u || !/^https:\/\//i.test(u)) {
     throw new Error("Instagram Stories require a public HTTPS image_url");
   }
-  const res = await fetch(imageUrl, {
+  const res = await fetch(u, {
     method: "GET",
-    signal: AbortSignal.timeout(15000),
+    signal: AbortSignal.timeout(20000),
     redirect: "follow",
-    headers: { "User-Agent": "RadiantWaves/1.0 (Social Bot)" },
+    headers: { "User-Agent": BROWSER_UA, Accept: "image/*,*/*;q=0.8" },
   });
   if (!res.ok) throw new Error(`Story image_url returned HTTP ${res.status}`);
   const ct = (res.headers.get("content-type") || "").toLowerCase();
-  if (!ct.startsWith("image/")) {
+  const buf = Buffer.from(await res.arrayBuffer());
+  const isJpeg = buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
+  const isPng = buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50;
+  const looksImage = isJpeg || isPng || ct.startsWith("image/");
+  if (!looksImage && !(ct.includes("octet-stream") && (isJpeg || isPng))) {
     throw new Error(`Story image_url must be an image (got Content-Type: ${ct || "unknown"})`);
   }
 }
@@ -804,11 +829,12 @@ async function postInstagramStory(imageUrl) {
   const token = env("FB_PAGE_ACCESS_TOKEN");
   const pageId = env("FB_PAGE_ID", "me");
   if (!token || !imageUrl) return null;
-  await verifyHttpsImageUrlForInstagram(imageUrl);
+  const urlHttps = igPublicImageUrl(imageUrl);
+  await verifyHttpsImageUrlForInstagram(urlHttps);
   const igUserId = await resolveIgUserId(token, pageId);
 
   const createParams = new URLSearchParams({
-    image_url: imageUrl,
+    image_url: urlHttps,
     media_type: "STORIES",
     access_token: token,
   });
@@ -839,7 +865,7 @@ async function postInstagramStory(imageUrl) {
     if (!pubData.error) return pubData;
 
     const msg = pubData.error?.message || "Instagram story publish failed";
-    const retryable = msg.includes("Media ID is not available");
+    const retryable = msg.includes("Media ID is not available") || msg.includes("not ready");
     if (!retryable || attempt === 4) throw new Error(msg);
     await sleep(4000 * attempt);
   }
@@ -1099,10 +1125,8 @@ async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
       }
     }
     if (!fbFeedOk) {
-      throw new Error(
-        "Facebook Page feed post failed (photo + text fallbacks" +
-          (env("POST_TO_FACEBOOK_LINK_PREVIEW") === "1" ? " + link preview" : "") +
-          "). Enable POST_TO_FACEBOOK_LINK_PREVIEW=1 for a last-resort /feed post, or fix Page token permissions."
+      console.error(
+        "[social] Facebook Page feed failed — continuing with Instagram / stories (fix FB or set POST_TO_FACEBOOK=0 to skip FB only)."
       );
     }
   }
@@ -1196,6 +1220,14 @@ async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
     } catch (e) {
       console.error("Instagram Story error:", e?.message || e);
     }
+  }
+
+  if (wantFbFeed && fbToken && !fbFeedOk) {
+    throw new Error(
+      "Facebook Page feed post failed (photo + text fallbacks" +
+        (env("POST_TO_FACEBOOK_LINK_PREVIEW") === "1" ? " + link preview" : "") +
+        "). Enable POST_TO_FACEBOOK_LINK_PREVIEW=1 for a last-resort /feed post, set POST_TO_FACEBOOK=0 to allow IG-only success, or fix Page token permissions."
+    );
   }
 
   const postedKey = normalizeUrlForDedupe(art.url);
