@@ -4,7 +4,7 @@ import zlib from "zlib";
 import sharp from "sharp";
 
 /** Increment when posting logic changes; Actions logs should show this (if not, fork `main` is behind). */
-const SOCIAL_POST_SCRIPT_REV = 9;
+const SOCIAL_POST_SCRIPT_REV = 10;
 
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
@@ -614,7 +614,9 @@ async function uploadToImgbb(imageBuffer, apiKey, opts = {}) {
   const res = await fetch("https://api.imgbb.com/1/upload", { method: "POST", body: form });
   const data = await res.json();
   const url = data?.data?.image?.url ?? data?.data?.url;
-  return url && url.startsWith("http") ? url : "";
+  if (url && url.startsWith("http")) return url;
+  console.error("[imgbb] upload did not return a URL. success=%s status=%s body=%s", data?.success, res.status, JSON.stringify(data).slice(0, 800));
+  return "";
 }
 
 /** IG Stories + FB Stories expect photo/video; 9:16 JPEG is most reliable. */
@@ -628,10 +630,45 @@ async function buildStoryJpegFromCard(cardPngBuffer) {
 /**
  * User tokens hit /me/feed as the USER → publish_actions errors.
  * Resolve a Page access token: GET /{page-id}?fields=access_token or GET /me/accounts.
+ * Page access tokens: GET /me returns the Page — do NOT call /me/accounts (user-only); that breaks IG.
  */
 async function ensurePageAccessToken() {
   const raw = env("FB_PAGE_ACCESS_TOKEN");
   if (!raw) return;
+
+  try {
+    const probeRes = await fetch(
+      `${GRAPH}/me?fields=id,name,category,fan_count,instagram_business_account,tasks&access_token=${encodeURIComponent(raw)}`
+    );
+    const probe = await probeRes.json();
+    if (!probe.error) {
+      const looksLikePage =
+        typeof probe.fan_count === "number" ||
+        Array.isArray(probe.tasks) ||
+        (typeof probe.category === "string" && probe.category.length > 0) ||
+        probe.instagram_business_account != null;
+      if (looksLikePage && probe.id) {
+        process.env.FB_PAGE_ID = String(probe.id);
+        if (probe.instagram_business_account?.id) {
+          console.log(
+            "[facebook] Page access token detected — Page id=%s, instagram_business_account id=%s (skip /me/accounts)",
+            probe.id,
+            probe.instagram_business_account.id
+          );
+        } else {
+          console.warn(
+            "[facebook] Page access token — Page id=%s but no instagram_business_account. Link IG in Meta Business Suite (Page → settings).",
+            probe.id
+          );
+        }
+        return;
+      }
+    } else {
+      console.warn("[facebook] GET /me (token probe):", probe.error.message);
+    }
+  } catch (e) {
+    console.warn("[facebook] Page token probe failed:", e?.message || e);
+  }
 
   let pageId = env("FB_PAGE_ID", "me").trim();
 
