@@ -1023,7 +1023,7 @@ async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
     last_posted_title: art.title,
     last_posted_feed: targetFeed,
     posted_urls: mergedPosted,
-    skipped_urls: (Array.isArray(state?.skipped_urls) ? state.skipped_urls : []).slice(0, 5000),
+    skipped_urls: [],
     updated_at: new Date().toISOString(),
   });
   console.log("Updated social_state.json");
@@ -1044,12 +1044,15 @@ async function main() {
   }
 
   const state = readState();
+  // Stale skipped_urls from older runs blocked every candidate; skips only apply within this run.
+  state.skipped_urls = [];
+  const withImg = items.filter((it) => String(it.imageUrl || it.image || "").trim()).length;
   console.log(
-    "[social] feed=%s | pool=%d items | %d posted URLs | %d skipped | UTC hour=%d (rotation: politics=h%%3===0, football=1, celebrity=2)",
+    "[social] feed=%s | pool=%d items (%d with imageUrl) | %d posted URLs | UTC hour=%d (rotation: politics=h%%3===0, football=1, celebrity=2)",
     targetFeed,
     items.length,
+    withImg,
     getPostedUrlSet(state).size,
-    getSkippedUrlSet(state).size,
     new Date().getUTCHours()
   );
 
@@ -1058,7 +1061,7 @@ async function main() {
     const art = pickLatestUnposted(items, state);
     if (!art) {
       console.error(
-        "[social] FAILED: no unposted candidates left for feed=%s (or all skipped this run).",
+        "[social] FAILED: no unposted candidates for feed=%s (all posted, or none have imageUrl / pass URL filters).",
         targetFeed
       );
       process.exit(1);
