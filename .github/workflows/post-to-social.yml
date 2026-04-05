@@ -58,8 +58,9 @@ jobs:
           SNAPSHOT_REF: ${{ vars.SNAPSHOT_REF }}
           SITE_URL: ${{ vars.SITE_URL }}
           SHORTEN_LINK: ${{ vars.SHORTEN_LINK }}
-          # Set to 1 to use Radiant reader URL in captions instead of the source article URL.
+          # Default: Radiant reader (#/article?u=…). Set SOCIAL_USE_SOURCE_ARTICLE_LINK=1 for raw publisher URL.
           SOCIAL_USE_SITE_ARTICLE_LINK: ${{ vars.SOCIAL_USE_SITE_ARTICLE_LINK }}
+          SOCIAL_USE_SOURCE_ARTICLE_LINK: ${{ vars.SOCIAL_USE_SOURCE_ARTICLE_LINK }}
           # Default 1 when variable unset (repo root / Actions). Set var to 0 to disable.
           # Optional: POST_TO_FACEBOOK_LINK_PREVIEW=1 enables link-preview fallback (may show site logo).
           POST_TO_FACEBOOK_LINK_PREVIEW: ${{ vars.POST_TO_FACEBOOK_LINK_PREVIEW }}
