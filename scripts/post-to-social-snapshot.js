@@ -4,7 +4,7 @@ import zlib from "zlib";
 import sharp from "sharp";
 
 /** Increment when posting logic changes; Actions logs should show this (if not, fork `main` is behind). */
-const SOCIAL_POST_SCRIPT_REV = 16;
+const SOCIAL_POST_SCRIPT_REV = 17;
 
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
@@ -1274,14 +1274,16 @@ async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
   });
   const longSiteLink = buildSiteArticleViewUrl(art.url);
   const sourceArticleLink = normalizeUrl(art.url) || art.url;
-  /** Default: Radiant reader `SITE_URL/#/article?u=…`. Opt out: SOCIAL_USE_SOURCE_ARTICLE_LINK=1 or SOCIAL_USE_SITE_ARTICLE_LINK=0|false. SHORTEN_LINK applies after. */
+  /** Default: Radiant reader `SITE_URL/#/article?u=…`. Opt out: SOCIAL_USE_SOURCE_ARTICLE_LINK=1 or SOCIAL_USE_SITE_ARTICLE_LINK=0|false. SHORTEN_LINK only applies to non-reader URLs (reader links stay full so captions match the agreed format). */
   let postLink = longSiteLink;
   if (/^1|true|yes$/i.test(env("SOCIAL_USE_SOURCE_ARTICLE_LINK"))) {
     postLink = sourceArticleLink;
   } else if (/^0|false|no|off$/i.test(env("SOCIAL_USE_SITE_ARTICLE_LINK"))) {
     postLink = sourceArticleLink;
   }
-  if (env("SHORTEN_LINK") === "1" || env("SHORTEN_LINK").toLowerCase() === "true") {
+  const shortenWanted = env("SHORTEN_LINK") === "1" || env("SHORTEN_LINK").toLowerCase() === "true";
+  const isRadiantReaderLink = postLink.includes("#/article?u=");
+  if (shortenWanted && !isRadiantReaderLink) {
     postLink = await shortenUrl(postLink);
   }
 
