@@ -4,7 +4,7 @@ import zlib from "zlib";
 import sharp from "sharp";
 
 /** Increment when posting logic changes; Actions logs should show this (if not, fork `main` is behind). */
-const SOCIAL_POST_SCRIPT_REV = 18;
+const SOCIAL_POST_SCRIPT_REV = 19;
 
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
@@ -1146,6 +1146,7 @@ async function postFacebookFeedLink(caption, link) {
   const params = new URLSearchParams({
     message: `${caption}\n\n${link}`.slice(0, 5000),
     link,
+    published: "true",
     access_token: token,
   });
   const res = await fetch(`${GRAPH}/${encodeURIComponent(pageId)}/feed`, {
@@ -1173,6 +1174,7 @@ async function postFacebookFeedTextOnly(caption, link) {
   if (!token || !link) return null;
   const params = new URLSearchParams({
     message: `${caption}\n\n${link}`.slice(0, 5000),
+    published: "true",
     access_token: token,
   });
   const res = await fetch(`${GRAPH}/${encodeURIComponent(pageId)}/feed`, {
@@ -1362,24 +1364,25 @@ async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
   if (wantFbFeed && fbToken) {
     if (fbPostStyle === "feed") {
       console.log("[social] Facebook Page feed (timeline /feed — FACEBOOK_POST_STYLE=feed)…");
+      // Text+URL first (no `link` attachment): often surfaces in Page "Posts" better than link-preview posts.
       try {
-        const fb0 = await postFacebookFeedLink(art.title, postLink);
+        const fb0 = await postFacebookFeedTextOnly(art.title, postLink);
         if (fb0?.id) {
-          console.log("Posted to Facebook (feed + link preview). Post id:", fb0.id);
+          console.log("Posted to Facebook (feed text + URL). Post id:", fb0.id);
           fbFeedOk = true;
         }
       } catch (e0) {
-        console.error("Facebook feed+link error:", e0?.message || e0);
+        console.error("Facebook feed text error:", e0?.message || e0);
       }
       if (!fbFeedOk) {
         try {
-          const fb1 = await postFacebookFeedTextOnly(art.title, postLink);
+          const fb1 = await postFacebookFeedLink(art.title, postLink);
           if (fb1?.id) {
-            console.log("Posted to Facebook (feed text + URL, no preview). Post id:", fb1.id);
+            console.log("Posted to Facebook (feed + link preview). Post id:", fb1.id);
             fbFeedOk = true;
           }
         } catch (e1) {
-          console.error("Facebook feed text error:", e1?.message || e1);
+          console.error("Facebook feed+link error:", e1?.message || e1);
         }
       }
       if (!fbFeedOk && fbFeedFallbackPhoto) {
