@@ -4,7 +4,7 @@ import zlib from "zlib";
 import sharp from "sharp";
 
 /** Increment when posting logic changes; Actions logs should show this (if not, fork `main` is behind). */
-const SOCIAL_POST_SCRIPT_REV = 17;
+const SOCIAL_POST_SCRIPT_REV = 18;
 
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
@@ -1349,39 +1349,83 @@ async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
     throw new Error("POST_TO_FACEBOOK is enabled but FB_PAGE_ACCESS_TOKEN (or Page token) is missing");
   }
 
+  /** Facebook only: `photo` (default) = `/photos` postcard. `feed` = `/feed` link/text first (better on Page Posts tab); optional photo fallback. */
+  const fbPostStyle = (() => {
+    const s = env("FACEBOOK_POST_STYLE", "photo").toLowerCase();
+    if (s === "feed" || s === "timeline") return "feed";
+    return "photo";
+  })();
+  const fbFeedFallbackPhoto = !/^0|false|no|off$/i.test(env("FACEBOOK_FEED_FALLBACK_PHOTO", "1"));
+
   // Facebook feed: photo = postcard; fallbacks until one returns an id (required when wantFbFeed).
   let fbFeedOk = false;
   if (wantFbFeed && fbToken) {
-    console.log("[social] Facebook Page feed (postcard photo)…");
-    try {
-      const fb = await postToFacebook(art.title, postLink, card);
-      if (fb?.id) {
-        console.log("Posted to Facebook (photo / postcard). Post id:", fb.id);
-        fbFeedOk = true;
-      }
-    } catch (e) {
-      console.error("Facebook photo error:", e?.message || e);
-    }
-    if (!fbFeedOk) {
+    if (fbPostStyle === "feed") {
+      console.log("[social] Facebook Page feed (timeline /feed — FACEBOOK_POST_STYLE=feed)…");
       try {
-        const fb2 = await postFacebookFeedTextOnly(art.title, postLink);
-        if (fb2?.id) {
-          console.log("Posted to Facebook (text + URL, no link preview). Post id:", fb2.id);
+        const fb0 = await postFacebookFeedLink(art.title, postLink);
+        if (fb0?.id) {
+          console.log("Posted to Facebook (feed + link preview). Post id:", fb0.id);
           fbFeedOk = true;
         }
-      } catch (e2) {
-        console.error("Facebook text fallback error:", e2?.message || e2);
+      } catch (e0) {
+        console.error("Facebook feed+link error:", e0?.message || e0);
       }
-    }
-    if (!fbFeedOk && env("POST_TO_FACEBOOK_LINK_PREVIEW") === "1") {
+      if (!fbFeedOk) {
+        try {
+          const fb1 = await postFacebookFeedTextOnly(art.title, postLink);
+          if (fb1?.id) {
+            console.log("Posted to Facebook (feed text + URL, no preview). Post id:", fb1.id);
+            fbFeedOk = true;
+          }
+        } catch (e1) {
+          console.error("Facebook feed text error:", e1?.message || e1);
+        }
+      }
+      if (!fbFeedOk && fbFeedFallbackPhoto) {
+        console.log("[social] Facebook feed paths failed — fallback postcard photo (FACEBOOK_FEED_FALLBACK_PHOTO)…");
+        try {
+          const fbf = await postToFacebook(art.title, postLink, card);
+          if (fbf?.id) {
+            console.log("Posted to Facebook (photo / postcard fallback). Post id:", fbf.id);
+            fbFeedOk = true;
+          }
+        } catch (ef) {
+          console.error("Facebook photo fallback error:", ef?.message || ef);
+        }
+      }
+    } else {
+      console.log("[social] Facebook Page feed (postcard photo — default)…");
       try {
-        const fb3 = await postFacebookFeedLink(art.title, postLink);
-        if (fb3?.id) {
-          console.log("Posted to Facebook (link preview — may show site logo). Post id:", fb3.id);
+        const fb = await postToFacebook(art.title, postLink, card);
+        if (fb?.id) {
+          console.log("Posted to Facebook (photo / postcard). Post id:", fb.id);
           fbFeedOk = true;
         }
-      } catch (e3) {
-        console.error("Facebook link-preview error:", e3?.message || e3);
+      } catch (e) {
+        console.error("Facebook photo error:", e?.message || e);
+      }
+      if (!fbFeedOk) {
+        try {
+          const fb2 = await postFacebookFeedTextOnly(art.title, postLink);
+          if (fb2?.id) {
+            console.log("Posted to Facebook (text + URL, no link preview). Post id:", fb2.id);
+            fbFeedOk = true;
+          }
+        } catch (e2) {
+          console.error("Facebook text fallback error:", e2?.message || e2);
+        }
+      }
+      if (!fbFeedOk && env("POST_TO_FACEBOOK_LINK_PREVIEW") === "1") {
+        try {
+          const fb3 = await postFacebookFeedLink(art.title, postLink);
+          if (fb3?.id) {
+            console.log("Posted to Facebook (link preview — may show site logo). Post id:", fb3.id);
+            fbFeedOk = true;
+          }
+        } catch (e3) {
+          console.error("Facebook link-preview error:", e3?.message || e3);
+        }
       }
     }
     if (!fbFeedOk) {
