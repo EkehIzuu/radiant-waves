@@ -906,6 +906,15 @@ function normalizeFeedKey(f) {
   return String(f || "").trim().toLowerCase();
 }
 
+function ensureFeedOnItems(items, feedKey = "") {
+  const key = normalizeFeedKey(feedKey);
+  return (items || []).map((a) => {
+    if (!a || typeof a !== "object") return a;
+    if (normalizeFeedKey(a.feed)) return a;
+    return { ...a, feed: key };
+  });
+}
+
 /** Split snapshot items into politics / football / celebrity (unknown → politics). */
 function partitionByFeed(items) {
   const out = { politics: [], football: [], celebrity: [] };
@@ -989,25 +998,44 @@ async function loadHome() {
 
   /* GitHub snapshot (RW_SNAPSHOT_LATEST) — no API fallback, no localStorage */
   const snapshot = await loadHomeSnapshot();
-  const snapshotItems = snapshot?.items?.length ? snapshot.items : [];
+  const snapshotItems = Array.isArray(snapshot?.items) ? snapshot.items : [];
+
+  // Build feed blocks from dedicated per-feed snapshots first.
+  const feedSnapshots = await Promise.all(
+    HOME_FEEDS_ORDER.map(async (key) => {
+      const snap = await loadFeedSnapshot(key);
+      return [key, ensureFeedOnItems(snap?.items || [], key)];
+    })
+  );
+  const parts = Object.fromEntries(feedSnapshots);
+  const hasPerFeedData = HOME_FEEDS_ORDER.some((k) => (parts[k] || []).length > 0);
+
   const pool = snapshotItems.length
     ? snapshotItems.slice(0, Math.min(snapshotItems.length, HOME_SNAPSHOT_POOL_MAX))
     : [];
 
-  if (!snapshotItems.length) {
+  if (!hasPerFeedData && pool.length) {
+    const fallbackParts = partitionByFeed(pool);
+    for (const key of HOME_FEEDS_ORDER) {
+      parts[key] = fallbackParts[key] || [];
+    }
+  }
+
+  const combinedItems = HOME_FEEDS_ORDER.flatMap((k) => parts[k] || []);
+
+  if (!combinedItems.length) {
     setStaleUI(!navigator.onLine, navigator.onLine ? "no snapshot yet" : "offline — snapshot unavailable");
   } else {
     setStaleUI(false);
   }
 
   /* Hero / breaking / sidebar: all feeds combined, newest first */
-  let all = [...pool].sort((a, b) => ingestTimeMs(b) - ingestTimeMs(a));
+  let all = [...combinedItems].sort((a, b) => ingestTimeMs(b) - ingestTimeMs(a));
   const mixedForText = all;
   let filtered = filterArticlesForHome(all);
   if (!filtered.length && all.length) filtered = all;
   const mixed = filtered;
 
-  const parts = partitionByFeed(pool);
   const categorySectionsHtml = buildHomeCategorySections(parts);
 
   const breaking = mixed[0] || null;
