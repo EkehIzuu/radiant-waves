@@ -762,8 +762,8 @@ def upsert_article(doc: Dict[str, Any]) -> bool:
         if AI_MARK_PENDING:
             ai = existing_doc.get("ai") or {}
             headline = ai.get("headline") or {}
+            article_ai = ai.get("article") or {}
             old_hash = (headline.get("titleHash") or "").strip()
-            old_status = (headline.get("status") or "").strip()
 
             # If title hash unchanged AND status already in progress/done → don't touch
             # Else: mark pending so worker can rewrite
@@ -785,6 +785,18 @@ def upsert_article(doc: Dict[str, Any]) -> bool:
                 doc["sourceTitle"] = doc.get("title") or existing_doc.get("title") or ""
                 doc.setdefault("sourceTitle_first", existing_doc.get("sourceTitle_first") or existing_doc.get("title") or doc.get("title") or "")
 
+            # ✅ Full-article marker: re-run when title changed, or it never has (older docs)
+            article_should_mark = should_mark or not (article_ai.get("status") or "").strip()
+            if article_should_mark:
+                doc.setdefault("ai", {})
+                doc["ai"].setdefault("article", {})
+                doc["ai"]["article"].update({
+                    "status": "pending",
+                    "titleHash": new_hash,
+                    "requestedAt": now,
+                    "error": "",
+                })
+
         coll.document(snap.id).set(doc, merge=True)
         return True
 
@@ -795,6 +807,13 @@ def upsert_article(doc: Dict[str, Any]) -> bool:
         doc.setdefault("ai", {})
         doc["ai"].setdefault("headline", {})
         doc["ai"]["headline"].update({
+            "status": "pending",
+            "titleHash": new_hash,
+            "requestedAt": now,
+            "error": "",
+        })
+        doc["ai"].setdefault("article", {})
+        doc["ai"]["article"].update({
             "status": "pending",
             "titleHash": new_hash,
             "requestedAt": now,

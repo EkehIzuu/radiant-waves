@@ -65,6 +65,8 @@ AI_TASK_TOKEN = (os.getenv("AI_TASK_TOKEN") or "").strip()   # protect /tasks/ai
 AI_ENABLED = (os.getenv("AI_ENABLED", "0") == "1")          # 1 to enable real rewriting
 AI_MODEL = (os.getenv("AI_MODEL") or "gpt-4.1-mini").strip()
 OPENAI_API_KEY = (os.getenv("OPENAI_API_KEY") or "").strip()
+AI_ARTICLE_MIN_WORDS = int(os.getenv("AI_ARTICLE_MIN_WORDS", "350"))
+AI_ARTICLE_MAX_WORDS = int(os.getenv("AI_ARTICLE_MAX_WORDS", "600"))
 
 # ------------------------------------------
 
@@ -233,6 +235,13 @@ def _get_doc_by_slug(slug: str):
     q = coll.where("slug", "==", slug).limit(1).stream()
     return next(q, None)
 
+def _get_doc_by_url(url: str):
+    if FieldFilter:
+        q = coll.where(filter=FieldFilter("url", "==", url)).limit(1).stream()
+    else:
+        q = coll.where("url", "==", url).limit(1).stream()
+    return next(q, None)
+
 # ----------------- CORS + cache headers -----------------
 @app.after_request
 def add_cors(resp):
@@ -260,6 +269,7 @@ def root():
         "ai": {"enabled": AI_ENABLED, "model": AI_MODEL if AI_ENABLED else None},
         "endpoints": [
             "/articles",
+            "/article",
             "/search_articles",
             "/football",
             "/livescore",
@@ -269,6 +279,7 @@ def root():
             "/trending",
             "/tasks/recompute_trending",
             "/tasks/ai_rewrite_headlines",
+            "/tasks/ai_write_articles",
             "/ai/status",
             "/diag",
             "/health",
@@ -704,6 +715,148 @@ def _openai_rewrite_title(source_title: str, feed: str = "") -> str:
             pass
     txt = (txt or "").strip()
     return txt
+
+def _openai_write_full_article(source_title: str, summary: str, source: str, feed: str = "") -> str:
+    """
+    Write an original, credited news article grounded in the given title/summary.
+    Uses OpenAI Responses API via raw HTTPS (no extra dependency).
+    """
+    if not OPENAI_API_KEY:
+        raise RuntimeError("OPENAI_API_KEY not set")
+    if not source_title or not source_title.strip():
+        raise RuntimeError("empty title")
+
+    system = (
+        "You are a news writer for Radiant Waves, a Nigerian news site. "
+        "Write ONLY in your own original words — never copy phrasing from the input. "
+        "Do not invent facts, quotes, names, or figures beyond what is given below. "
+        "Always credit the original source by name near the top of the piece."
+    )
+    user = (
+        f"Feed/category: {feed or 'general'}\n"
+        f"Original source: {source or 'the original source'}\n"
+        f"Headline: {source_title}\n"
+        f"Known summary/facts:\n{summary or '(no further details provided)'}\n\n"
+        f"Write an original {AI_ARTICLE_MIN_WORDS}-{AI_ARTICLE_MAX_WORDS} word news article covering this story, "
+        f"opening by attributing it to the original source by name (e.g. \"According to {source or 'the original source'}, ...\"). "
+        "Do not fabricate details not present above. Plain text only, no markdown, no headers, no bullet points."
+    )
+
+    url = "https://api.openai.com/v1/responses"
+    headers = {
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    body = {
+        "model": AI_MODEL,
+        "input": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        "temperature": 0.4,
+    }
+
+    r = requests.post(url, headers=headers, json=body, timeout=45)
+    if r.status_code >= 400:
+        raise RuntimeError(f"OpenAI error {r.status_code}: {r.text[:300]}")
+
+    data = r.json()
+    txt = (data.get("output_text") or "").strip()
+    if not txt:
+        try:
+            out = data.get("output") or []
+            for item in out:
+                if item.get("type") == "message":
+                    for c in item.get("content") or []:
+                        if c.get("type") == "output_text":
+                            txt = (c.get("text") or "").strip()
+                            break
+        except Exception:
+            pass
+    return (txt or "").strip()
+
+@app.post("/tasks/ai_write_articles")
+def ai_write_articles():
+    token = request.headers.get("X-AI-TOKEN", "")
+    if not AI_TASK_TOKEN or token != AI_TASK_TOKEN:
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+
+    if not AI_ENABLED:
+        return jsonify({"ok": False, "error": "AI_DISABLED"}), 400
+    if not OPENAI_API_KEY:
+        return jsonify({"ok": False, "error": "OPENAI_API_KEY_MISSING"}), 400
+
+    try:
+        limit = int(request.args.get("limit", "10"))
+    except Exception:
+        limit = 10
+    limit = _clamp(limit, 1, 25)
+
+    processed = 0
+    written = 0
+    failed = 0
+
+    qref = coll.where("ai.article.status", "==", "pending") \
+               .order_by("ingestedAt", direction=firestore.Query.DESCENDING) \
+               .limit(limit)
+
+    docs = list(qref.stream(retry=None, timeout=20))
+    if not docs:
+        return jsonify({"ok": True, "processed": 0, "written": 0, "failed": 0}), 200
+
+    for snap in docs:
+        processed += 1
+        ref = coll.document(snap.id)
+        d = snap.to_dict() or {}
+
+        title = (d.get("sourceTitle") or d.get("title") or "").strip()
+        summary = (d.get("summary") or "").strip()
+        source = (d.get("source") or "").strip()
+        feed = (d.get("feed") or "").strip()
+
+        try:
+            ref.set({
+                "ai": {"article": {"status": "processing", "startedAt": firestore.SERVER_TIMESTAMP, "error": ""}}
+            }, merge=True)
+        except Exception:
+            pass
+
+        try:
+            text = _openai_write_full_article(title, summary, source, feed=feed)
+            if not text or len(text) < 200:
+                raise RuntimeError("article too short/empty")
+
+            ref.set({
+                "aiArticle": text,
+                "ai": {
+                    "article": {
+                        "status": "done",
+                        "doneAt": firestore.SERVER_TIMESTAMP,
+                        "error": "",
+                        "wordCount": len(text.split()),
+                    }
+                }
+            }, merge=True)
+            written += 1
+
+        except Exception as e:
+            failed += 1
+            ref.set({
+                "ai": {
+                    "article": {
+                        "status": "failed",
+                        "error": str(e)[:240],
+                        "doneAt": firestore.SERVER_TIMESTAMP,
+                    }
+                }
+            }, merge=True)
+
+    return jsonify({
+        "ok": True,
+        "processed": processed,
+        "written": written,
+        "failed": failed
+    }), 200
 
 @app.get("/ai/status")
 def ai_status():
@@ -1222,6 +1375,33 @@ def read(slug):
         "og_url": request.url
     }
     return render_template("read.html", article=doc, canonical=request.url, **og)
+
+@app.get("/article")
+def article_json():
+    """JSON article lookup by source URL — feeds the SPA reader view."""
+    page_url = (request.args.get("url") or "").strip()
+    if not page_url:
+        return jsonify({"ok": False, "error": "missing url"}), 400
+
+    snap = _get_doc_by_url(page_url)
+    if not snap:
+        return jsonify({"ok": False, "error": "not_found"}), 404
+
+    d = snap.to_dict() or {}
+    d["id"] = snap.id
+    d = ensure_image_fields(d)
+    pub = doc_to_public(d)
+
+    return jsonify({
+        "ok": True,
+        "title": pub.get("title"),
+        "source": pub.get("source"),
+        "publishedAt": pub.get("publishedAt"),
+        "imageUrl": pub.get("imageUrl") or pub.get("image"),
+        "summary": pub.get("summary"),
+        "content": pub.get("aiArticle") or "",
+        "sourceUrl": pub.get("url"),
+    }), 200
 
 @app.get("/r/<doc_id>")
 def r_redirect(doc_id):

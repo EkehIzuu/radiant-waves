@@ -4,6 +4,9 @@
 <h1 style="margin:.25rem 0 1rem">{{ article.cleanTitle or article.title }}</h1>
 <img src="{{ article.imageUrl or article.image }}" alt="" loading="eager">
 <p style="font-size:1.05rem;margin:1rem 0 0.75rem">{{ article.cleanSummary or article.excerpt or article.description }}</p>
+{% if article.aiArticle %}
+<div style="font-size:1.05rem;line-height:1.7;white-space:pre-wrap;margin:0 0 1rem">{{ article.aiArticle }}</div>
+{% endif %}
 <p style="color:#667">Source: <a href="{{ article.link or article.url }}" rel="noopener nofollow" target="_blank">{{ article.source or (article.link or article.url) }}</a></p>
 <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
   <a class="chip" href="https://www.facebook.com/sharer/sharer.php?u={{ og_url|urlencode }}" target="_blank" rel="noopener">Share Facebook</a>

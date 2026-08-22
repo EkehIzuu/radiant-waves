@@ -1,0 +1,43 @@
+name: AI content tasks
+
+# Runs 10/40 past the hour — after ingest.yml's :00/:30 runs, so new articles
+# have already been marked ai.headline/ai.article = pending by the time this fires.
+on:
+  schedule:
+    - cron: "10,40 * * * *"
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Max articles to process per task"
+        default: "10"
+
+jobs:
+  run-ai-tasks:
+    runs-on: ubuntu-latest
+    env:
+      SITE_BASE: ${{ vars.SITE_BASE || 'https://radiant-waves.onrender.com' }}
+      AI_TASK_TOKEN: ${{ secrets.AI_TASK_TOKEN }}
+      LIMIT: ${{ github.event.inputs.limit || '10' }}
+    steps:
+      - name: Check required secret
+        run: |
+          if [ -z "$AI_TASK_TOKEN" ]; then
+            echo "Missing secret: AI_TASK_TOKEN (must match AI_TASK_TOKEN env var on the API host)"
+            exit 1
+          fi
+
+      - name: Rewrite pending headlines
+        run: |
+          code=$(curl -sS -o /tmp/headlines.json -w "%{http_code}" -X POST \
+            "$SITE_BASE/tasks/ai_rewrite_headlines?limit=$LIMIT" \
+            -H "X-AI-TOKEN: $AI_TASK_TOKEN")
+          echo "HTTP $code"
+          cat /tmp/headlines.json
+
+      - name: Write pending full articles
+        run: |
+          code=$(curl -sS -o /tmp/articles.json -w "%{http_code}" -X POST \
+            "$SITE_BASE/tasks/ai_write_articles?limit=$LIMIT" \
+            -H "X-AI-TOKEN: $AI_TASK_TOKEN")
+          echo "HTTP $code"
+          cat /tmp/articles.json

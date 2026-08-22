@@ -2,6 +2,7 @@ import os
 import re
 import json
 import gzip
+import hashlib
 import logging
 from datetime import datetime, timezone
 from urllib.parse import (
@@ -40,6 +41,9 @@ PROJECT_ID = (os.getenv("GOOGLE_CLOUD_PROJECT") or "").strip()
 # Snapshot settings (written to repo snapshots/ only — GitHub raw URLs)
 SNAPSHOT_LIMIT_HOME = int(os.getenv("SNAPSHOT_LIMIT_HOME", "150"))         # latest combined
 SNAPSHOT_LIMIT_PER_FEED = int(os.getenv("SNAPSHOT_LIMIT_PER_FEED", "200")) # per feed
+
+# AI marker toggle (only affects Firestore fields; no AI calls happen here)
+AI_MARK_PENDING = os.getenv("AI_MARK_PENDING", "1").strip() == "1"
 
 FALLBACK_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -126,6 +130,10 @@ _BAD_HOST_BITS = (
 
 def dt_utc_now():
     return datetime.now(timezone.utc)
+
+def _title_hash(title: str) -> str:
+    t = (title or "").strip().lower()
+    return hashlib.sha1(t.encode("utf-8")).hexdigest()
 
 def iso(dt):
     try:
@@ -710,6 +718,9 @@ def upsert_article(doc):
     if not url:
         return False
 
+    now = dt_utc_now()
+    new_hash = _title_hash(doc.get("title") or "")
+
     try:
         if FieldFilter:
             existing = list(coll.where(filter=FieldFilter("url", "==", url)).limit(1).stream())
@@ -721,10 +732,65 @@ def upsert_article(doc):
             if "ingestedAt" in existing_doc:
                 doc["ingestedAt"] = existing_doc["ingestedAt"]
             else:
-                doc["ingestedAt"] = dt_utc_now()
+                doc["ingestedAt"] = now
+
+            if AI_MARK_PENDING:
+                ai = existing_doc.get("ai") or {}
+                headline = ai.get("headline") or {}
+                article_ai = ai.get("article") or {}
+                old_hash = (headline.get("titleHash") or "").strip()
+
+                should_mark = (new_hash != old_hash)
+                if should_mark:
+                    doc.setdefault("ai", {})
+                    doc["ai"].setdefault("headline", {})
+                    doc["ai"]["headline"].update({
+                        "status": "pending",
+                        "titleHash": new_hash,
+                        "requestedAt": now,
+                        "error": "",
+                    })
+                    doc.setdefault("sourceTitle_first", existing_doc.get("sourceTitle_first") or existing_doc.get("title") or doc.get("title") or "")
+                    doc["sourceTitle"] = doc.get("title") or existing_doc.get("title") or ""
+                else:
+                    doc["sourceTitle"] = doc.get("title") or existing_doc.get("title") or ""
+                    doc.setdefault("sourceTitle_first", existing_doc.get("sourceTitle_first") or existing_doc.get("title") or doc.get("title") or "")
+
+                # Full-article marker: re-run when title changed, or it never has (older docs)
+                article_should_mark = should_mark or not (article_ai.get("status") or "").strip()
+                if article_should_mark:
+                    doc.setdefault("ai", {})
+                    doc["ai"].setdefault("article", {})
+                    doc["ai"]["article"].update({
+                        "status": "pending",
+                        "titleHash": new_hash,
+                        "requestedAt": now,
+                        "error": "",
+                    })
+
             coll.document(existing[0].id).set(doc, merge=True)
             return True
-        doc["ingestedAt"] = dt_utc_now()
+
+        doc["ingestedAt"] = now
+        if AI_MARK_PENDING:
+            doc.setdefault("ai", {})
+            doc["ai"].setdefault("headline", {})
+            doc["ai"]["headline"].update({
+                "status": "pending",
+                "titleHash": new_hash,
+                "requestedAt": now,
+                "error": "",
+            })
+            doc["ai"].setdefault("article", {})
+            doc["ai"]["article"].update({
+                "status": "pending",
+                "titleHash": new_hash,
+                "requestedAt": now,
+                "error": "",
+            })
+            doc["sourceTitle_first"] = doc.get("title") or ""
+            doc["sourceTitle"] = doc.get("title") or ""
+
         coll.add(doc)
         return True
     except Exception as e:
