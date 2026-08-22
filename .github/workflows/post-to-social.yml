@@ -1,5 +1,7 @@
 # Posts one feed per run from snapshot (Telegram + optional Meta). Green only when Telegram succeeds.
-# UTC rotation each hour: hour%3===0 → politics, ===1 → football, ===2 → celebrity (one post per hour).
+# UTC rotation every 3h block: block%3===0 → politics, ===1 → football, ===2 → celebrity.
+# Lower frequency + richer captions (title + summary, not bare links) to avoid Meta's
+# "unoriginal content" distribution demotion on Facebook.
 name: Post to social (snapshot)
 
 # One run at a time so social_state.json push/rebase races don't drop posted_urls.
@@ -9,8 +11,8 @@ concurrency:
 
 on:
   schedule:
-    # Every hour at :00 UTC — feed chosen by scripts/post-to-social-snapshot.js (hour % 3)
-    - cron: "0 * * * *"
+    # Every 3 hours at :00 UTC — feed chosen by scripts/post-to-social-snapshot.js (hour block % 3)
+    - cron: "0 */3 * * *"
   workflow_dispatch:
     inputs:
       feed:

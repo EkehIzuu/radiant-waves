@@ -43,12 +43,12 @@ function resolveFeedBaseUrl() {
 
 const SNAPSHOT_FEED_NAMES = ["politics", "football", "celebrity"];
 
-/** Hourly UTC: 0→politics, 1→football, 2→celebrity, then repeat. Override with SOCIAL_TARGET_FEED or workflow_dispatch. */
+/** Every 3h UTC: block 0→politics, 1→football, 2→celebrity, then repeat. Override with SOCIAL_TARGET_FEED or workflow_dispatch. */
 function resolveTargetFeed() {
   const explicit = env("SOCIAL_TARGET_FEED").toLowerCase();
   if (explicit && explicit !== "auto" && SNAPSHOT_FEED_NAMES.includes(explicit)) return explicit;
   const h = new Date().getUTCHours();
-  return SNAPSHOT_FEED_NAMES[h % 3];
+  return SNAPSHOT_FEED_NAMES[Math.floor(h / 3) % 3];
 }
 
 function filterItemsByFeed(items, feed) {
@@ -85,6 +85,20 @@ const GRAPH = "https://graph.facebook.com/v21.0";
 
 function stripHtml(str) {
   return String(str || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Bare "headline + link" posts are exactly the pattern Meta's spam/quality
+ * systems demote as "unoriginal content." Add a short summary line so posts
+ * carry actual substance instead of just a link drop.
+ */
+function buildSocialCaption(art) {
+  const title = stripHtml(art.title || "").trim();
+  const summary = stripHtml(art.summary || "").trim();
+  if (!summary) return title;
+  if (summary.toLowerCase().startsWith(title.toLowerCase().slice(0, 30))) return title;
+  const snippet = summary.length > 220 ? summary.slice(0, 217).trim() + "…" : summary;
+  return `${title}\n\n${snippet}`;
 }
 
 function readState() {
@@ -1290,7 +1304,8 @@ async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
   }
 
   const card = await generateCard(art.title, art.imageUrl, imageBufferValidated);
-  const tg = await postTelegram(art.title, postLink, card);
+  const caption = buildSocialCaption(art);
+  const tg = await postTelegram(caption, postLink, card);
   console.log("Posted to Telegram.");
 
   await ensurePageAccessToken();
@@ -1366,7 +1381,7 @@ async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
       console.log("[social] Facebook Page feed (timeline /feed — FACEBOOK_POST_STYLE=feed)…");
       // Text+URL first (no `link` attachment): often surfaces in Page "Posts" better than link-preview posts.
       try {
-        const fb0 = await postFacebookFeedTextOnly(art.title, postLink);
+        const fb0 = await postFacebookFeedTextOnly(caption, postLink);
         if (fb0?.id) {
           console.log("Posted to Facebook (feed text + URL). Post id:", fb0.id);
           fbFeedOk = true;
@@ -1376,7 +1391,7 @@ async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
       }
       if (!fbFeedOk) {
         try {
-          const fb1 = await postFacebookFeedLink(art.title, postLink);
+          const fb1 = await postFacebookFeedLink(caption, postLink);
           if (fb1?.id) {
             console.log("Posted to Facebook (feed + link preview). Post id:", fb1.id);
             fbFeedOk = true;
@@ -1388,7 +1403,7 @@ async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
       if (!fbFeedOk && fbFeedFallbackPhoto) {
         console.log("[social] Facebook feed paths failed — fallback postcard photo (FACEBOOK_FEED_FALLBACK_PHOTO)…");
         try {
-          const fbf = await postToFacebook(art.title, postLink, card);
+          const fbf = await postToFacebook(caption, postLink, card);
           if (fbf?.id) {
             console.log("Posted to Facebook (photo / postcard fallback). Post id:", fbf.id);
             fbFeedOk = true;
@@ -1400,7 +1415,7 @@ async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
     } else {
       console.log("[social] Facebook Page feed (postcard photo — default)…");
       try {
-        const fb = await postToFacebook(art.title, postLink, card);
+        const fb = await postToFacebook(caption, postLink, card);
         if (fb?.id) {
           console.log("Posted to Facebook (photo / postcard). Post id:", fb.id);
           fbFeedOk = true;
@@ -1410,7 +1425,7 @@ async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
       }
       if (!fbFeedOk) {
         try {
-          const fb2 = await postFacebookFeedTextOnly(art.title, postLink);
+          const fb2 = await postFacebookFeedTextOnly(caption, postLink);
           if (fb2?.id) {
             console.log("Posted to Facebook (text + URL, no link preview). Post id:", fb2.id);
             fbFeedOk = true;
@@ -1421,7 +1436,7 @@ async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
       }
       if (!fbFeedOk && env("POST_TO_FACEBOOK_LINK_PREVIEW") === "1") {
         try {
-          const fb3 = await postFacebookFeedLink(art.title, postLink);
+          const fb3 = await postFacebookFeedLink(caption, postLink);
           if (fb3?.id) {
             console.log("Posted to Facebook (link preview — may show site logo). Post id:", fb3.id);
             fbFeedOk = true;
@@ -1481,7 +1496,7 @@ async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
 
   if (envSocialEnabled("POST_TO_INSTAGRAM") && fbToken && imageUrlForIg) {
     try {
-      const ig = await postInstagram(`${art.title}\n\n${postLink}`, imageUrlForIg);
+      const ig = await postInstagram(`${caption}\n\n${postLink}`, imageUrlForIg);
       if (ig?.id) console.log("Posted to Instagram. Media id:", ig.id);
     } catch (e) {
       const firstErr = e?.message || String(e);
@@ -1498,7 +1513,7 @@ async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
             .toBuffer();
           const hosted = await uploadToImgbb(igJpeg, imgbbKey, { name: "ig-tg-4x5.jpg", mime: "image/jpeg" });
           if (!hosted) throw new Error("imgbb upload failed");
-          const ig2 = await postInstagram(`${art.title}\n\n${postLink}`, hosted);
+          const ig2 = await postInstagram(`${caption}\n\n${postLink}`, hosted);
           if (ig2?.id) console.log("Posted to Instagram (imgbb fallback). Media id:", ig2.id);
         } catch (e2) {
           console.error("Instagram error:", e2?.message || e2);
