@@ -800,7 +800,12 @@ def ai_write_articles():
                .order_by("ingestedAt", direction=firestore.Query.DESCENDING) \
                .limit(limit)
 
-    docs = list(qref.stream(retry=None, timeout=20))
+    try:
+        docs = list(qref.stream(retry=None, timeout=20))
+    except ResourceExhausted:
+        log.warning("ai_write_articles: Firestore quota exceeded")
+        return jsonify({"ok": False, "error": "quota_exceeded"}), 503
+
     if not docs:
         return jsonify({"ok": True, "processed": 0, "written": 0, "failed": 0}), 200
 
@@ -902,7 +907,12 @@ def ai_rewrite_headlines():
                .order_by("ingestedAt", direction=firestore.Query.DESCENDING) \
                .limit(limit)
 
-    docs = list(qref.stream(retry=None, timeout=20))
+    try:
+        docs = list(qref.stream(retry=None, timeout=20))
+    except ResourceExhausted:
+        log.warning("ai_rewrite_headlines: Firestore quota exceeded")
+        return jsonify({"ok": False, "error": "quota_exceeded"}), 503
+
     if not docs:
         return jsonify({"ok": True, "processed": 0, "rewritten": 0, "failed": 0}), 200
 
@@ -1383,7 +1393,11 @@ def article_json():
     if not page_url:
         return jsonify({"ok": False, "error": "missing url"}), 400
 
-    snap = _get_doc_by_url(page_url)
+    try:
+        snap = _get_doc_by_url(page_url)
+    except ResourceExhausted:
+        return jsonify({"ok": False, "error": "quota_exceeded"}), 503
+
     if not snap:
         return jsonify({"ok": False, "error": "not_found"}), 404
 
