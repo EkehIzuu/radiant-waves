@@ -89,7 +89,21 @@ jobs:
           # social_state.json may be modified by script; stash to rebase cleanly
           git stash push -u -m "state" -- social_state.json || true
           git pull --rebase
-          git stash pop || true
+
+          if ! git stash pop; then
+            echo "Stash pop conflicted — concurrent run touched social_state.json."
+            echo "Keeping this run's freshly generated state (the stash) rather than leaving conflict markers."
+            git checkout --theirs -- social_state.json
+            git add social_state.json
+            git stash drop || true
+          fi
+
+          # Hard safety net: never let unresolved conflict markers reach a commit.
+          if grep -qE '^(<<<<<<<|=======|>>>>>>>)' social_state.json; then
+            echo "::error::social_state.json still contains conflict markers — aborting without committing."
+            exit 1
+          fi
+
           git add social_state.json
           git diff --cached --quiet && echo "No state changes" && exit 0
           git commit -m "chore: update social snapshot state"
