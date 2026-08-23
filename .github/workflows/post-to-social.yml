@@ -86,25 +86,35 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          # social_state.json may be modified by script; stash to rebase cleanly
-          git stash push -u -m "state" -- social_state.json || true
-          git pull --rebase
 
-          if ! git stash pop; then
-            echo "Stash pop conflicted — concurrent run touched social_state.json."
-            echo "Keeping this run's freshly generated state (the stash) rather than leaving conflict markers."
-            git checkout --theirs -- social_state.json
+          if [ ! -f social_state.json ]; then
+            echo "No social_state.json produced by this run — nothing to save."
+            exit 0
+          fi
+
+          # Don't git-merge this file at all — it's small bookkeeping state, not
+          # something that benefits from text-level 3-way merging (that's exactly
+          # what kept committing literal conflict markers as JSON content).
+          # Instead: keep our freshly-generated copy, sync everything else to the
+          # latest origin/main, then commit+push just this file, retrying on races.
+          cp social_state.json /tmp/social_state_new.json
+
+          for attempt in 1 2 3; do
+            git fetch origin main
+            git reset --hard origin/main
+            cp /tmp/social_state_new.json social_state.json
             git add social_state.json
-            git stash drop || true
-          fi
-
-          # Hard safety net: never let unresolved conflict markers reach a commit.
-          if grep -qE '^(<<<<<<<|=======|>>>>>>>)' social_state.json; then
-            echo "::error::social_state.json still contains conflict markers — aborting without committing."
-            exit 1
-          fi
-
-          git add social_state.json
-          git diff --cached --quiet && echo "No state changes" && exit 0
-          git commit -m "chore: update social snapshot state"
-          git push
+            if git diff --cached --quiet; then
+              echo "No state changes"
+              exit 0
+            fi
+            git commit -m "chore: update social snapshot state"
+            if git push origin HEAD:main; then
+              echo "Pushed state update."
+              exit 0
+            fi
+            echo "Push rejected (concurrent update) — retrying ($attempt/3)…"
+            sleep $((attempt * 5))
+          done
+          echo "::error::Failed to push social_state.json after 3 attempts."
+          exit 1
