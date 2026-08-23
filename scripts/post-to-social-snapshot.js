@@ -1375,7 +1375,10 @@ async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
   const fbFeedFallbackPhoto = !/^0|false|no|off$/i.test(env("FACEBOOK_FEED_FALLBACK_PHOTO", "1"));
 
   // Facebook feed: photo = postcard; fallbacks until one returns an id (required when wantFbFeed).
+  // Errors are also written into social_state.json (last_facebook_debug) so they're visible
+  // without digging through Action logs.
   let fbFeedOk = false;
+  const fbErrors = {};
   if (wantFbFeed && fbToken) {
     if (fbPostStyle === "feed") {
       console.log("[social] Facebook Page feed (timeline /feed — FACEBOOK_POST_STYLE=feed)…");
@@ -1388,6 +1391,7 @@ async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
         }
       } catch (e0) {
         console.error("Facebook feed text error:", e0?.message || e0);
+        fbErrors.feedText = String(e0?.message || e0);
       }
       if (!fbFeedOk) {
         try {
@@ -1398,6 +1402,7 @@ async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
           }
         } catch (e1) {
           console.error("Facebook feed+link error:", e1?.message || e1);
+          fbErrors.feedLink = String(e1?.message || e1);
         }
       }
       if (!fbFeedOk && fbFeedFallbackPhoto) {
@@ -1410,6 +1415,7 @@ async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
           }
         } catch (ef) {
           console.error("Facebook photo fallback error:", ef?.message || ef);
+          fbErrors.photoFallback = String(ef?.message || ef);
         }
       }
     } else {
@@ -1419,9 +1425,12 @@ async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
         if (fb?.id) {
           console.log("Posted to Facebook (photo / postcard). Post id:", fb.id);
           fbFeedOk = true;
+        } else {
+          fbErrors.photo = `no image buffer or no token (card bytes=${card?.length || 0}, hasToken=${Boolean(fbToken)})`;
         }
       } catch (e) {
         console.error("Facebook photo error:", e?.message || e);
+        fbErrors.photo = String(e?.message || e);
       }
       if (!fbFeedOk) {
         try {
@@ -1432,6 +1441,7 @@ async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
           }
         } catch (e2) {
           console.error("Facebook text fallback error:", e2?.message || e2);
+          fbErrors.feedText = String(e2?.message || e2);
         }
       }
       if (!fbFeedOk && env("POST_TO_FACEBOOK_LINK_PREVIEW") === "1") {
@@ -1443,6 +1453,7 @@ async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
           }
         } catch (e3) {
           console.error("Facebook link-preview error:", e3?.message || e3);
+          fbErrors.feedLink = String(e3?.message || e3);
         }
       }
     }
@@ -1451,6 +1462,19 @@ async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
         "[social] Facebook Page feed failed — continuing with Instagram / stories (fix FB or set POST_TO_FACEBOOK=0 to skip FB only)."
       );
     }
+    // Best-effort: persist the outcome/errors now, before any later throw could skip it.
+    try {
+      writeState({
+        ...state,
+        last_facebook_debug: {
+          at: new Date().toISOString(),
+          style: fbPostStyle,
+          ok: fbFeedOk,
+          cardBytes: card?.length || 0,
+          errors: fbErrors,
+        },
+      });
+    } catch {}
   }
 
   // FB Story: prefer public JPEG URL (Page token + imgbb); multipart unpublished needs true Page token.

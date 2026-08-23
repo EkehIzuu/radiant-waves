@@ -82,6 +82,7 @@ jobs:
         run: node scripts/post-to-social-snapshot.js
 
       - name: Save social state back to repo
+        if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
