@@ -1379,6 +1379,7 @@ async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
   // without digging through Action logs.
   let fbFeedOk = false;
   const fbErrors = {};
+  let fbDebug = null;
   if (wantFbFeed && fbToken) {
     if (fbPostStyle === "feed") {
       console.log("[social] Facebook Page feed (timeline /feed — FACEBOOK_POST_STYLE=feed)…");
@@ -1463,17 +1464,16 @@ async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
       );
     }
     // Best-effort: persist the outcome/errors now, before any later throw could skip it.
+    // (Also merged into the final writeState() below so a successful later write doesn't clobber it.)
+    fbDebug = {
+      at: new Date().toISOString(),
+      style: fbPostStyle,
+      ok: fbFeedOk,
+      cardBytes: card?.length || 0,
+      errors: fbErrors,
+    };
     try {
-      writeState({
-        ...state,
-        last_facebook_debug: {
-          at: new Date().toISOString(),
-          style: fbPostStyle,
-          ok: fbFeedOk,
-          cardBytes: card?.length || 0,
-          errors: fbErrors,
-        },
-      });
+      writeState({ ...state, last_facebook_debug: fbDebug });
     } catch {}
   }
 
@@ -1611,6 +1611,7 @@ async function performSocialPost(art, imageBufferValidated, state, targetFeed) {
     last_posted_feed: targetFeed,
     posted_urls: mergedPosted,
     skipped_urls: [],
+    last_facebook_debug: fbDebug ?? state?.last_facebook_debug,
     updated_at: new Date().toISOString(),
   });
   console.log("Updated social_state.json");
